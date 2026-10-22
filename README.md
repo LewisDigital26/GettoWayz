@@ -20,31 +20,32 @@ Install it as an app from the browser's "Add to Home Screen" / "Install" prompt 
 
 | Feature | Default (no config) | With config |
 |---|---|---|
-| Map tiles | **Live** — CARTO dark basemap over OpenStreetMap (attribution shown on map) | Custom tile URL via `TILE_URL` |
+| Map tiles | **Live** — OpenStreetMap standard tiles, no key (dark colourways apply a CSS filter). OSM's tile policy is for light use; for a launched app set `TILE_URL` to a provider such as MapTiler, Stadia or Thunderforest (free tiers with a key) | Custom tile URL + attribution via `TILE_URL` / `TILE_ATTRIBUTION` |
 | Place search | **Live** — Nominatim (OpenStreetMap) public API, fair-use; sample places merged in | Add `NOMINATIM_EMAIL` (asked by their usage policy) |
-| Routing | **Sample** — hand-made example routes between sample places in Coventry; anything else gets a clearly labelled straight-line *estimate* | **Live** via OpenRouteService (`ORS_API_KEY`) or a self-hosted OSRM (`OSRM_BASE_URL`) |
+| Streetlight positions | **Live** — `highway=street_lamp` nodes from OpenStreetMap via the public Overpass API (no key; volunteer-mapped, coverage varies). Working/out status is **never** inferred from the map — it comes only from dated community reports. `STREETLIGHT_SOURCE: "sample"` gives labelled demo lamps; `"none"` disables the layer | Self-hosted Overpass via `OVERPASS_URL`; a council live feed can be added as another provider that sets `liveStatus` on lamps |
+| Sunrise / sunset | **Live** — computed locally from the map centre (NOAA solar equations); no network, no stored location | — |
+| Routing | **Sample** — hand-made example routes between sample places in Coventry; anything else gets a clearly labelled straight-line *estimate*. Driving shows a "needs a routing provider" message instead of a fabricated route | **Live** via OpenRouteService (`ORS_API_KEY`) or a self-hosted OSRM (`OSRM_BASE_URL`) — walking, cycling and driving |
 | Geolocation | **Live** — browser Geolocation API, asked for only when needed, never stored | — |
-| Accounts, alerts, path suggestions, points, leaderboard, moderation | **Local demo** — `localStorage` on this device only. Not shared with anyone. Seeded with sample users/alerts/paths flagged `sample: true` | Implement the `Backend` interface (below) against your real service |
-| Friends, live-location sharing, trip sharing | **Local demo** (or **live** with Supabase, below) — works only between accounts signed in on the same browser (e.g. two tabs; tabs sync via `storage` events). A sample friend (`GW-KERB-H0P1`) auto-accepts and can run a *scripted* trip so you can see the viewer UI. Nothing leaves the device. | Implement the social methods + a `RealtimeProvider` (see below) |
+| Accounts, alerts, path suggestions, points, leaderboard, moderation | **Local demo** — `localStorage` on this device only. Not shared with anyone. Seeded with sample users/alerts/paths flagged `sample: true` | **Live** with Supabase (below) |
+| Friends, live-location sharing, trip sharing | **Local demo** (or **live** with Supabase, below) — works only between accounts signed in on the same browser (e.g. two tabs). A sample friend (`GW-KERB-H0P1`) auto-accepts and can run a *scripted* trip so you can see the viewer UI. Nothing leaves the device. | Supabase Realtime |
 
 Every route card carries a `Live` / `Sample` / `Estimate` chip and a plain-language "basis" line, and alerts/paths from the seed are labelled *Sample*. Nothing in demo mode is presented as live or verified.
 
 ## Configure real services
 
-Copy `config.example.js` to `config.local.js` (git-ignored) and fill in what you have:
+Copy `config.example.js` to `config.local.js` and fill in what you have. Keys live only in `config.local.js` on the client. For production, proxy OpenRouteService through your backend so the key is not shipped to browsers.
 
-```js
-window.GW_CONFIG = {
-  ORS_API_KEY: "",        // openrouteservice.org — enables live routing (foot-walking / cycling-regular)
-  OSRM_BASE_URL: "",      // alternative: self-hosted OSRM with foot + bike profiles
-  TILE_URL: "",           // optional custom tile template; TILE_ATTRIBUTION must match your provider's terms
-  TILE_ATTRIBUTION: "",
-  NOMINATIM_EMAIL: "",    // your contact email for Nominatim's usage policy
-  BACKEND: "local"        // swap to your adapter name once added in js/backend/index.js
-};
-```
+### Driving mode
 
-Keys live only in `config.local.js` on the client. For production, proxy OpenRouteService through your backend so the key is not shipped to browsers.
+Drive uses the provider's car profile (`driving-car` on OpenRouteService, `driving` on OSRM), which follows OpenStreetMap access rules — cars are never routed onto footways, cycleways, pedestrian zones or private roads. Neither engine supplies live traffic or real-time closures, so travel times are free-flow estimates and every car route carries a **No live traffic** chip. Without a routing provider, Drive shows a clear "needs a routing provider" message rather than a fabricated route. While navigating in Drive the bar is larger, nothing needs tapping except **End**, and voice guidance (browser SpeechSynthesis, en-GB) is on by default with a toggle; walking/cycling can turn voice on too. There are no adverts anywhere in the app.
+
+### Streetlights and night mode
+
+- **Layer control**: map layers (⧉ button) → Streetlights: *Auto (night)* / *On* / *Off*. Auto turns the layer on between sunset and sunrise, computed locally. The badge shows the next sunrise/sunset. Preference is stored on the device.
+- **Lamp status** (derived in `deriveLampStatus`): 🟡 *Recently confirmed working* — a `light_ok` report within 14 days; 🔴 *Reported out* — latest report is `light_out` (30-day expiry); ⚪ *Unknown / not verified* — no current report. Tapping a lamp shows the status, when it was last reported, moderator verification, and the report history, plus **Seen it working** / **Report out**.
+- **Reports** go through the normal alert system: 5/day, no duplicates per category within 25 m, expire automatically, moderators verify, points only on verification or 2+ confirmations. Zoom ≥ 15 to load lamps; the Overpass query is bounded to the visible area (padded) and cached 10 min.
+- **Routing at night**: each route is scored by sampling every 25 m and checking lamps within 30 m — *confirmed* / *reported out* / *unknown* / *no data*. The route card shows `🔦 N% lit·confirmed` and the sheet shows a bar with all four shares and a plain-language sentence (e.g. "66% has no lamp data at all"). On the map the selected route gets a thin warm overlay on confirmed stretches and red on reported-out ones. **Prefer routes with confirmed lighting** appears only at night and only when at least one route has ≥ 20% confirmed coverage; it ranks routes by that share and labels the best "Most confirmed lighting". Nothing is ever described as safe.
+- **Privacy**: lamps are fetched for the map view, not the user's position; no route or location history is stored.
 
 ### Scooter mode
 
@@ -55,59 +56,32 @@ No public routing engine has a scooter profile. Scooter mode uses the cycling ne
 Everything — accounts, alerts, paths, points, friends, live sharing, trip rewards — runs on one free Supabase project.
 
 1. **Create a project** at supabase.com (Ireland / eu-west-1 is fine for the UK).
-2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
+2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before streetlights were added: also run `supabase/migration-002-streetlights.sql`.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block.
 3. **Keys**: *Project Settings → API*. Copy the Project URL and the **anon / publishable** key (never the `service_role` key).
-4. **Config**: copy `config.example.js` → `config.local.js`:
-   ```js
-   window.GW_CONFIG = { SUPABASE_URL: "https://<id>.supabase.co", SUPABASE_ANON_KEY: "<anon key>", BACKEND: "supabase" };
-   ```
-5. **Auth**: in *Authentication → Providers → Email*, turn **Confirm email** off while testing (otherwise sign-up asks users to click a link first). Accounts are email + password; the email is never shown to other users.
-6. **Serve over HTTPS** (GitHub Pages / Netlify / Cloudflare Pages) — browsers only give location to secure pages. Add that URL under *Authentication → URL Configuration*.
+4. **Config**: copy `config.example.js` → `config.local.js` and set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `BACKEND: "supabase"`.
+5. **Auth**: in *Authentication → Providers → Email*, turn **Confirm email** off while testing. Accounts are email + password; the email is never shown to other users.
+6. **Serve over HTTPS** (GitHub Pages / Netlify) — browsers only give location to secure pages. Add that URL under *Authentication → URL Configuration*.
 7. **Make yourself a moderator**: after signing up, run `update profiles set role = 'admin' where alias = 'your-alias';` in the SQL editor.
 
-What the SQL enforces server-side: all rate limits, points only via `gw_grant()` (clients cannot write `point_entries` or `profiles.points`), share positions readable only by the two participants (RLS), progress along the route computed in `update_share_position()` so clients can't inflate distance, `trip_check_in()` replay-proof via a unique `trips.share_id`, block → sessions ended and positions nulled in one statement. Tested locally against Postgres 16 under the `authenticated` role.
-
-Realtime: `SupabaseRealtime` (in `js/backend/supabase.js`) subscribes to `shares` and `friends` changes; Supabase only streams rows the signed-in user's RLS policies allow, so a user never receives someone else's session.
-
-## Connect a different backend
-
-`js/backend/index.js` documents the interface. Implement it (Supabase, Firebase, your own API…) and register it in `createBackend()`:
-
-```
-currentUser, register, signIn, signOut, updateUser, onChange
-listAlerts, createAlert, confirmAlert, reviewAlert
-listPaths, suggestPath, reviewPath
-pointHistory, leaderboard
-```
-
-Server-side you must enforce what `localDemo.js` enforces client-side: rate limits (`rules.js`), "no confirming your own report", points granted **only** on moderator approval/verification, and the `admin` role check on review calls. Approved paths should be served to all clients from `listPaths()` — the map and the "More verified paths" labelling read from there.
+What the SQL enforces server-side: all rate limits, points only via `gw_grant()`, share positions readable only by the two participants (RLS), route progress computed in `update_share_position()`, `trip_check_in()` replay-proof, block → sessions ended and positions nulled. Tested locally against Postgres 16 under the `authenticated` role.
 
 ## Friends & trip sharing
 
-**Flows**
-- *Add a friend*: Account → Friends shows your non-sequential ID (`GW-XXXX-XXXX`, copyable). Enter someone's ID → Find → Send request. Lookup returns alias + ID only. They must accept; until then nothing is visible either way. Reject, cancel, remove, block, report, and "who can send me requests" (anyone / nobody) are all in the Friends screen.
-- *Share live location*: Friends → Share location → consent screen (who sees it, auto-stop time, one-direction, no history, foreground-only) → pick 15/30/60/120 min → Start. Location permission is requested at that moment. A banner on the map shows who can see you, start/end time, Pause/Stop. The session ends at the chosen time, on Stop, on sign-out, on unfriend, or immediately on block (either direction).
-- *Share a trip*: tapping **Start navigation** offers "Share your trip?" with a friend picker and a separate shared-rewards opt-in. The recipient sees your route, latest position, % progress and an ETA (estimate) under Friends → Sharing, or by tapping your marker on the map. Positions older than 45 s show as "Last seen", older than 2 min as "Connection lost". The session ends on arrival check-in, End/cancel, or its time cap (2× ETA + 15 min, max 4 h). "Share mine back" is a separate opt-in for the recipient.
-- *Arrival check-in*: on arrival (or End), an optional check-in awards +5 trip points. If **both** people opted into shared-trip rewards, a distance-banded bonus is added for both: 500 m +4 · 1.5 km +8 · 3 km +12 · 6 km +20 (max +20/trip, +40/day). Eligible distance = progress along the chosen route (backend-tracked, monotonic, capped at route length; off-route positions are ignored). Check-ins are rejected more than 75 m from the destination when a position is known, replays are rejected per session, and up to 8 check-ins/day earn points.
-
-**Privacy model (enforced in the backend adapter, must be enforced server-side too)**
-- Every social call requires a signed-in user; share positions are returned only to the session's recipient; non-owners cannot push to or stop a session.
-- Only the **latest** position of an active session is stored; it is deleted when the session ends. The completed-trip ledger stores distance and points only, no coordinates.
-- ID lookups are limited to 10/hour and friend requests to 10/day; blocked users look like they don't exist.
-- The web app cannot share in the background. This is stated on the consent screen and shown to recipients as a stale/lost state rather than faked.
-
-**Realtime**: `js/providers/realtime.js` defines `RealtimeProvider { onUpdate(cb), isCrossDevice, note }`. The demo implementation listens to backend changes in this browser. For real users, implement it over WebSockets / Supabase Realtime / Firebase, scoping each subscription to the session ids the signed-in user may see, and keep publishing through `backend.updateSharePosition()` so access checks live in one place.
+- *Add a friend*: Account → Friends shows your non-sequential ID (`GW-XXXX-XXXX`). Enter someone's ID → Find → Send request. Lookup returns alias + ID only. They must accept first. Reject, cancel, remove, block, report, and "who can send me requests" are all in the Friends screen.
+- *Share live location*: consent screen → 15/30/60/120 min → Start. Banner shows who can see you and when it ends, with Pause/Stop. Ends on time, Stop, sign-out, unfriend, or immediately on block.
+- *Share a trip*: **Start navigation** offers "Share your trip?" with a friend picker and a separate shared-rewards opt-in. Positions older than 45 s show as "Last seen", older than 2 min as "Connection lost".
+- *Arrival check-in*: +5 trip points. If **both** opted into shared-trip rewards: 500 m +4 · 1.5 km +8 · 3 km +12 · 6 km +20 (max +20/trip, +40/day), from progress along the chosen route only.
+- Only the **latest** position of an active session is stored and it is deleted when the session ends. ID lookups 10/hour, friend requests 10/day.
 
 ## Colourways
 
-Account → Appearance (or "Change colourway" on the home sheet) switches between three palettes built from the logo (navy `#202b47`, lime `#aaf129`, teal `#2bb190`): **Night Route** (default), **Deep Navy**, **Daylight**. The choice is stored in `localStorage`; Daylight also swaps the default basemap to CARTO light. Tokens live at the top of `css/app.css`.
+Account → Appearance switches between three palettes built from the logo: **Night Route** (default), **Deep Navy**, **Daylight**. Tokens live at the top of `css/app.css`.
 
-## Points & trust rules (shown in-app under Account → Rules)
+## Points & trust rules
 
 - +50 missing path approved · +10 alert verified · +5 your alert confirmed by 2+ users · +2 you confirmed an alert later verified · +5 trip check-in · up to +20 shared-trip bonus
-- Submitting earns nothing. Limits: 5 reports, 3 path suggestions, 20 confirmations per day. Duplicate pins within 25 m are blocked.
-- Alerts expire by category (3–60 days); verified alerts get a review date.
-- Leaderboard is opt-in and shows alias, points, level only. Live location and travel history are never stored or shown.
+- Submitting earns nothing. Limits: 5 reports, 3 path suggestions, 20 confirmations per day.
+- Alerts expire by category (3–60 days). Leaderboard is opt-in and shows alias, points, level only.
 
 ## Project layout
 
@@ -115,16 +89,14 @@ Account → Appearance (or "Change colourway" on the home sheet) switches betwee
 index.html              app shell
 css/app.css             design tokens + styles
 js/app.js               wiring: search, routing, navigation, controls
-js/map.js               Leaflet wrapper: tiles, routes, pins, draw tool
-js/state.js             tiny store
-js/providers/           routing.js (ORS / OSRM / sample), geocoding.js (Nominatim), realtime.js, sampleData.js
-js/backend/             index.js (interface), localDemo.js, social.js (friends/sharing/rewards), seed.js, rules.js
-js/ui/                  sheet, modal, alerts, paths, account, admin, friends screens
+js/map.js               Leaflet wrapper: tiles, routes, pins, lamps, draw tool
+js/providers/           routing.js (ORS / OSRM / sample), geocoding.js (Nominatim), streetlights.js (Overpass / sample + status + scoring), realtime.js, sampleData.js
+js/backend/             index.js (interface), localDemo.js, supabase.js, social.js, seed.js, rules.js
+js/ui/                  sheet, modal, alerts, paths, account, admin, friends, streetlights screens
+supabase/               schema.sql, migration-002-streetlights.sql
 sw.js                   caches the app shell for offline launch (tiles/APIs are never cached)
-manifest.webmanifest    PWA manifest + icons/
-config.example.js       copy to config.local.js
 ```
 
 ## Attribution
 
-Map data © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors. Default tiles © [CARTO](https://carto.com/attributions). Search by [Nominatim](https://nominatim.org). Routing (when configured) by [OpenRouteService](https://openrouteservice.org). Leaflet is BSD-2-Clause.
+Map data and streetlight positions © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, via the [Overpass API](https://overpass-api.de). Search by [Nominatim](https://nominatim.org). Routing (when configured) by [OpenRouteService](https://openrouteservice.org). Leaflet is BSD-2-Clause.
