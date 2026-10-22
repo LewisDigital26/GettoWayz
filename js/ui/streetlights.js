@@ -85,12 +85,13 @@ export class Streetlights {
   async load(b) {
     if (!this.provider) return;
     this.loading = true; this.error = null;
+    $('#lightsNote').textContent = 'Loading streetlight positions…';
     try {
       this.lamps = await this.provider.fetchLamps(b);
       this.loadedBounds = b;
       $('#lightsNote').textContent = `${this.lamps.length} lamp${this.lamps.length === 1 ? '' : 's'} in view · ${this.provider.isLive ? 'positions from OpenStreetMap' : 'SAMPLE data'}. Status comes only from community reports.`;
     } catch (e) {
-      if (e.name !== 'AbortError') { this.error = e.message; $('#lightsNote').textContent = 'Streetlight positions unavailable: ' + e.message; }
+      if (e.name !== 'AbortError') { this.error = e.message; this.loadedBounds = null; $('#lightsNote').textContent = e.message; }
     } finally { this.loading = false; }
   }
   /** Ensure lamps are loaded for an arbitrary bbox (used for route scoring). Returns true if data covers it. */
