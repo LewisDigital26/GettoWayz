@@ -1,0 +1,148 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Ghetto Wayz</title>
+  <meta name="description" content="Ghetto Wayz — routes for walking, cycling and scooters, with community-reported paths and alerts." />
+  <meta name="theme-color" content="#16181f" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="icons/icon-192.png" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="css/app.css" />
+  <script>try{var c=localStorage.getItem("gw:colourway");if(c)document.documentElement.setAttribute("data-colourway",c);}catch(e){}</script>
+</head>
+<body>
+  <div id="app" class="app">
+
+    <!-- MAP -->
+    <div id="map" class="map" role="application" aria-label="Map"></div>
+
+    <!-- TOP BAR -->
+    <header class="topbar">
+      <button class="brand" id="brandBtn" aria-label="Ghetto Wayz home">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">Ghetto <em>Wayz</em></span>
+      </button>
+      <div class="searchbox">
+        <svg class="searchbox-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M10 4a6 6 0 1 1 0 12 6 6 0 0 1 0-12Zm0-2a8 8 0 1 0 4.9 14.3l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0 0 10 2Z"/></svg>
+        <input id="searchInput" type="search" placeholder="Where to?" autocomplete="off" enterkeyhint="search" aria-label="Search destination" />
+        <button id="searchClear" class="searchbox-clear" aria-label="Clear search" hidden>×</button>
+      </div>
+      <button class="iconbtn" id="profileBtn" aria-label="Account">
+        <span id="profileAvatar" class="avatar">G</span>
+      </button>
+    </header>
+
+    <!-- SEARCH RESULTS -->
+    <div id="searchResults" class="search-results" hidden></div>
+
+    <!-- MODE SWITCHER -->
+    <div class="modebar" id="modebar" role="tablist" aria-label="Travel mode">
+      <button role="tab" data-mode="walk" aria-selected="true">🚶 Walk</button>
+      <button role="tab" data-mode="bike" aria-selected="false">🚲 Bike</button>
+      <button role="tab" data-mode="scooter" aria-selected="false">🛴 Scooter</button>
+    </div>
+
+    <!-- MAP CONTROLS -->
+    <div class="mapctl">
+      <button class="iconbtn" id="zoomIn" aria-label="Zoom in">+</button>
+      <button class="iconbtn" id="zoomOut" aria-label="Zoom out">−</button>
+      <button class="iconbtn" id="layersBtn" aria-label="Map layers">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Zm-8 9.6L2 13.6l10 5 10-5-2-1-8 4-8-4Zm0 4L2 17.6l10 5 10-5-2-1-8 4-8-4Z"/></svg>
+      </button>
+      <button class="iconbtn accent" id="locateBtn" aria-label="My location">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm9 3h-2.1A7 7 0 0 0 13 5.1V3h-2v2.1A7 7 0 0 0 5.1 11H3v2h2.1A7 7 0 0 0 11 18.9V21h2v-2.1a7 7 0 0 0 5.9-5.9H21v-2Zm-9 7a5 5 0 1 1 0-10 5 5 0 0 1 0 10Z"/></svg>
+      </button>
+    </div>
+
+    <!-- ACTIVE SHARING BANNER -->
+    <div id="shareBanner" class="sharebanner" hidden></div>
+
+    <!-- CONTRIBUTE FABS -->
+    <div class="fabs" id="fabs">
+      <button class="fab" id="friendsBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13Zm8 0c-.3 0-.6 0-1 .1 1.2.8 2 2 2 3.4V19h6v-2.5c0-2.3-4.7-3.5-7-3.5Z"/></svg>
+        <span>Friends</span>
+      </button>
+      <button class="fab" id="reportBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/></svg>
+        <span>Report</span>
+      </button>
+      <button class="fab" id="suggestBtn">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 17.25V21h3.75L17.8 9.94l-3.75-3.75L3 17.25ZM20.7 7.04a1 1 0 0 0 0-1.41l-2.34-2.34a1 1 0 0 0-1.41 0l-1.83 1.83 3.75 3.75 1.83-1.83Z"/></svg>
+        <span>Add path</span>
+      </button>
+    </div>
+
+    <!-- LAYERS PANEL -->
+    <div id="layersPanel" class="popover" hidden>
+      <label><input type="checkbox" id="layerAlerts" checked /> Community alerts</label>
+      <label><input type="checkbox" id="layerPaths" checked /> Community-added paths</label>
+      <label><input type="checkbox" id="layerPending" /> My pending suggestions</label>
+    </div>
+
+    <!-- BOTTOM SHEET -->
+    <section id="sheet" class="sheet" aria-live="polite">
+      <div class="sheet-handle" id="sheetHandle"><span></span></div>
+      <div id="sheetContent" class="sheet-content"></div>
+    </section>
+
+    <!-- NAV BAR (when navigating) -->
+    <div id="navbar" class="navbar" hidden>
+      <div class="navbar-step">
+        <div class="navbar-icon" id="navIcon">↑</div>
+        <div>
+          <div class="navbar-instr" id="navInstr">Head north</div>
+          <div class="navbar-sub" id="navSub">—</div>
+        </div>
+      </div>
+      <div class="navbar-foot">
+        <div><strong id="navEta">—</strong> <span class="muted" id="navRemain">—</span></div>
+        <button class="btn danger" id="endNavBtn">End</button>
+      </div>
+    </div>
+
+    <!-- MODAL / FULL SCREEN VIEWS -->
+    <div id="modal" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <h2 id="modalTitle"></h2>
+          <button class="iconbtn" id="modalClose" aria-label="Close">×</button>
+        </div>
+        <div id="modalBody" class="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- TOASTS -->
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
+    <!-- DRAW HUD (path suggestion) -->
+    <div id="drawHud" class="drawhud" hidden>
+      <div class="drawhud-text">
+        <strong>Tap the map to add points</strong>
+        <span id="drawCount">0 points · start where the missing path begins</span>
+      </div>
+      <div class="drawhud-actions">
+        <button class="btn ghost" id="drawUndo">Undo</button>
+        <button class="btn ghost" id="drawCancel">Cancel</button>
+        <button class="btn primary" id="drawDone" disabled>Next</button>
+      </div>
+    </div>
+
+    <!-- OFFLINE/STATUS STRIP -->
+    <div id="statusStrip" class="status-strip" hidden></div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="config.local.js" onerror="void 0"></script>
+  <script>if (window.GW_CONFIG && window.GW_CONFIG.BACKEND === "supabase" && window.GW_CONFIG.SUPABASE_URL) document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"><\/script>');</script>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
