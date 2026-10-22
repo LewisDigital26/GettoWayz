@@ -17,7 +17,8 @@ export class SupabaseBackend {
     this.listeners = new Set();
     this.profile = null;
     this.ready = this.sb.auth.getSession().then(({ data }) => this.loadProfile(data.session?.user?.id));
-    this.sb.auth.onAuthStateChange((_evt, session) => this.loadProfile(session?.user?.id).then(() => this.emit()));
+        // Defer: supabase-js holds an internal lock while firing this callback; awaiting a query inside it deadlocks.
+        this.sb.auth.onAuthStateChange((_evt, session) => { setTimeout(() => this.loadProfile(session?.user?.id).then(() => this.emit()), 0); });
   }
   emit() { for (const cb of this.listeners) cb(); }
   onChange(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
