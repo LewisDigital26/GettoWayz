@@ -11,8 +11,10 @@ import { config, integrations } from '../config.js';
 import { haversine, lineLength, uid, MODES } from '../util.js';
 import { SAMPLE_PLACES, SAMPLE_ROUTES } from './sampleData.js';
 
-const ORS_PROFILES = { walk: 'foot-walking', bike: 'cycling-regular', scooter: 'cycling-regular' };
-const OSRM_PROFILES = { walk: 'foot', bike: 'bike', scooter: 'bike' };
+const ORS_PROFILES = { walk: 'foot-walking', bike: 'cycling-regular', scooter: 'cycling-regular', drive: 'driving-car' };
+const OSRM_PROFILES = { walk: 'foot', bike: 'bike', scooter: 'bike', drive: 'driving' };
+// Drive profiles follow each engine's car access rules (no footways, cycleways, pedestrian zones or private roads).
+// Neither engine provides live traffic or real-time closures, so durations are free-flow estimates.
 
 function scooterNote(mode) {
   return mode === 'scooter'
@@ -43,7 +45,8 @@ export class OpenRouteServiceProvider {
       const durationS = mode === 'scooter' ? distanceM / MODES.scooter.speed : f.properties.summary.duration;
       return {
         id: uid(), label: i === 0 ? 'Quickest' : 'Alternative',
-        basis: 'Live route from OpenRouteService over OpenStreetMap public ways.' + scooterNote(mode),
+        basis: (mode === 'drive' ? 'Live driving route from OpenRouteService on roads open to cars (OpenStreetMap access rules). Travel time is a free-flow estimate — no live traffic.' : 'Live route from OpenRouteService over OpenStreetMap public ways.') + scooterNote(mode),
+        traffic: false,
         source: 'live', geometry, distanceM, durationS,
         steps: (seg?.steps || []).map((s) => ({ text: s.instruction, dist: s.distance })),
       };
@@ -64,7 +67,8 @@ export class OsrmProvider {
     if (json.code !== 'Ok') throw new Error(json.message || 'No route found');
     const routes = json.routes.map((r, i) => ({
       id: uid(), label: i === 0 ? 'Quickest' : 'Alternative',
-      basis: 'Live route from OSRM over OpenStreetMap public ways.' + scooterNote(mode),
+      basis: (mode === 'drive' ? 'Live driving route from OSRM on roads open to cars. Travel time is a free-flow estimate — no live traffic.' : 'Live route from OSRM over OpenStreetMap public ways.') + scooterNote(mode),
+      traffic: false,
       source: 'live',
       geometry: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]),
       distanceM: r.distance,
@@ -88,6 +92,10 @@ export class SampleRoutingProvider {
   }
   async route({ from, to, mode }) {
     await new Promise((r) => setTimeout(r, 350)); // simulate network
+    if (mode === 'drive') {
+      // Sample data only covers walking/cycling paths. Never fabricate a car route.
+      return { provider: this.name, routes: [], unsupported: 'Driving routes need a configured routing provider (OpenRouteService key or OSRM URL in config.local.js). The built-in sample data only covers walking and cycling, and a straight-line estimate would be misleading for cars.' };
+    }
     const a = this.nearestPlace(from), b = this.nearestPlace(to);
     const speed = MODES[mode].speed;
     let pair = null, reversed = false;
