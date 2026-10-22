@@ -345,14 +345,27 @@ async function addCommunityRoutes(routes, from, to, mode) {
   return all;
 }
 
+/** Points every `step` metres along a polyline (including its vertices). */
+function densify(line, step) {
+  const out = [line[0]];
+  for (let i = 1; i < line.length; i++) {
+    const a = line[i - 1], b = line[i], n = Math.max(1, Math.ceil(haversine(a, b) / step));
+    for (let k = 1; k <= n; k++) out.push([a[0] + (b[0] - a[0]) * k / n, a[1] + (b[1] - a[1]) * k / n]);
+  }
+  return out;
+}
+
 /** Adds community-path coverage, nearby alerts and friendly labels to each route. */
 function annotateRoutes(routes) {
   const approved = state.paths.filter((p) => p.status === 'approved');
   for (const r of routes) {
     const used = new Set(r.communityPathIds || []);
     for (const p of approved) {
-      const hits = p.points.filter((pt) => distanceToLine(pt, r.geometry) < 25).length;
-      if (hits >= Math.max(2, Math.ceil(p.points.length * .6))) used.add(p.id);
+      // Sample along the path every ~5 m: a route only "uses" a path if it actually runs along most of it,
+      // not just past its two ends (short cut-throughs otherwise look used by any route around them).
+      const pts = densify(p.points, 5);
+      const hits = pts.filter((pt) => distanceToLine(pt, r.geometry) < 12).length;
+      if (hits >= Math.ceil(pts.length * .8)) used.add(p.id);
     }
     r.communityPathIds = [...used];
     r.alertsNear = alertsNearRoute(state.alerts, r.geometry, 40);
