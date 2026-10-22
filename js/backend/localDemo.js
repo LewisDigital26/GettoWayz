@@ -120,7 +120,7 @@ export class LocalDemoBackend {
     const mine = this.db.alerts.filter((a) => a.createdBy === user.id);
     if (mine.filter((a) => sameDay(a.createdAt)).length >= RATE_LIMITS.alertsPerDay)
       throw new BackendError('rate', `Limit reached: ${RATE_LIMITS.alertsPerDay} reports per day. Quality beats volume.`);
-    if (mine.some((a) => a.status === 'pending' && haversine([lat, lng], [a.lat, a.lng]) < RATE_LIMITS.minMetresBetweenOwnAlerts))
+        if (mine.some((a) => a.status === 'pending' && a.category === category && haversine([lat, lng], [a.lat, a.lng]) < RATE_LIMITS.minMetresBetweenOwnAlerts))
       throw new BackendError('dupe', 'You already have a pending report at this spot.');
     const alert = {
       id: 'a-' + uid(), category, lat: +lat.toFixed(5), lng: +lng.toFixed(5), note, status: 'pending',
