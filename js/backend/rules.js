@@ -40,6 +40,19 @@ export const ALERT_CATEGORIES = {
   closure:  { label: 'Temporary closure', emoji: '⛔', desc: 'Path or bridge closed', expiryDays: 14 },
   flooding: { label: 'Flooded / muddy', emoji: '🌊', desc: 'Standing water, impassable', expiryDays: 3 },
   other:    { label: 'Other hazard',   emoji: '⚠️', desc: 'Anything else worth knowing', expiryDays: 14 },
+  // Streetlight reports — attached to a lamp on the streetlight layer. Status is derived from these, never assumed.
+  light_out: { label: 'Streetlight out', emoji: '🔦', desc: 'This lamp is not working', expiryDays: 30, lamp: true },
+  light_ok:  { label: 'Streetlight working', emoji: '💡', desc: 'Seen working recently', expiryDays: 14, lamp: true },
+};
+
+// Streetlight layer rules
+export const STREETLIGHTS = {
+  matchRadiusM: 12,        // a report within this distance of a lamp is about that lamp
+  routeRadiusM: 30,        // a lamp within this distance of the route counts for that stretch
+  sampleStepM: 25,         // route is sampled every N metres when scoring lighting
+  minZoom: 15,             // lamps are only fetched/shown at this zoom or closer
+  confirmedDays: 14,       // "recently confirmed working" means a light_ok report within N days
+  preferLitMinConfirmedPct: 20, // the "prefer confirmed-lit" option is only offered when some route has at least this coverage
 };
 
 export const PATH_TYPES = {
