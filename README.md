@@ -31,6 +31,19 @@ Install it as an app from the browser's "Add to Home Screen" / "Install" prompt 
 
 Every route card carries a `Live` / `Sample` / `Estimate` chip and a plain-language "basis" line, and alerts/paths from the seed are labelled *Sample*. Nothing in demo mode is presented as live or verified.
 
+## Community paths in routing
+
+OpenRouteService and OSRM only know OpenStreetMap, so they can't route along a footpath or alley that the community added. The app joins them in itself (`js/providers/communityRouting.js`):
+
+1. It picks up to 2 **approved** community paths that suit the mode and could shorten the trip. Walking uses footpaths, shared paths and steps. Bike and scooter use cycle and shared paths. Driving never uses community paths.
+2. It asks the routing engine for *start → path entrance* and *path exit → destination*.
+3. It joins these as *leg 1 + community path + leg 2*. Each path end must be within 40 m of a way the engine can reach.
+4. It shows the result only if it's at most 25% slower than the engine's quickest route. If it's the quickest overall, it's labelled **Community shortcut**.
+
+The engine legs are live routes. The community section is timed at the mode's average speed and is shown as a 🟢 step. It costs up to 4 extra routing calls per search, and only when an approved path is nearby. Tuning is in `COMMUNITY_ROUTING` in `js/backend/rules.js`.
+
+The long-term fix is to add good, clearly public paths to OpenStreetMap itself, following OSM's rules: only map what you've surveyed. Every routing engine then picks them up.
+
 ## Configure real services
 
 Copy `config.example.js` to `config.local.js` and fill in what you have. Keys live only in `config.local.js` on the client. For production, proxy OpenRouteService through your backend so the key is not shipped to browsers.
