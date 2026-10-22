@@ -113,3 +113,15 @@ export const SHARE_DURATIONS = [
 export const SHARE_MAX_MINUTES = 240;         // hard ceiling, incl. trip shares
 export const SHARE_STALE_SECONDS = 45;        // position older than this is shown as "last seen", not live
 export const SHARE_LOST_SECONDS = 120;        // older than this = connection lost
+
+// ---------- Community paths in routing ----------
+// Approved community paths aren't in OpenStreetMap, so the routing engine can't see them. The app routes
+// to the path entrance and from the path exit, then stitches the community path in between.
+export const COMMUNITY_ROUTING = {
+  maxCandidates: 2,     // paths tried per route request (each costs up to 2 routing calls)
+  candidateSlack: 1.3,  // straight-line estimate via the path must be within 130% of the quickest route's distance
+  maxJoinGapM: 40,      // path ends must be within this distance of a road/path the engine can reach
+  skipLegUnderM: 15,    // if you're already this close to the path entrance/exit, no engine leg is needed
+  maxSlowdown: 1.25,    // offer a community route if it's at most 25% slower than the quickest
+  maxExtraRoutes: 1,
+};
