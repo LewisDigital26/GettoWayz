@@ -1,0 +1,16 @@
+{
+  "name": "Ghetto Wayz",
+  "short_name": "Ghetto Wayz",
+  "description": "Routes for walking, cycling and scooters, with community-added paths and alerts.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#16181f",
+  "theme_color": "#16181f",
+  "icons": [
+    { "src": "icons/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" },
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable" }
+  ]
+}
