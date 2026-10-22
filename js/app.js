@@ -51,7 +51,7 @@ ctx.map = new GwMap($('#map'), {
   onDrawPoint: (ll) => ctx.onDrawPoint?.(ll),
 });
 
-await (ctx.backend.ready || Promise.resolve());
+await Promise.race([ctx.backend.ready || Promise.resolve(), new Promise((r) => setTimeout(r, 6000))]); // never block the UI on auth
 set({ user: ctx.backend.currentUser() });
 ctx.backend.onChange(() => { set({ user: ctx.backend.currentUser() }); refreshData(); });
 ctx.realtime = await createRealtime(ctx.backend);
