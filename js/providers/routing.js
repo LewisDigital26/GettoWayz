@@ -53,6 +53,23 @@ export class OpenRouteServiceProvider {
     });
     return { provider: this.name, routes };
   }
+  /** One plain leg (no alternatives) — used to join community paths onto the road network. */
+  async leg(from, to, mode) {
+    const res = await fetch(`https://api.openrouteservice.org/v2/directions/${ORS_PROFILES[mode]}/geojson`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: this.key },
+      body: JSON.stringify({ coordinates: [[from[1], from[0]], [to[1], to[0]]], instructions: true }),
+    });
+    if (!res.ok) throw new Error(`Routing failed (${res.status})`);
+    const f = (await res.json()).features?.[0];
+    if (!f) throw new Error('No route');
+    const distanceM = f.properties.summary.distance;
+    return {
+      geometry: f.geometry.coordinates.map(([lng, lat]) => [lat, lng]), distanceM,
+      durationS: mode === 'scooter' ? distanceM / MODES.scooter.speed : f.properties.summary.duration,
+      steps: (f.properties.segments?.[0]?.steps || []).map((s) => ({ text: s.instruction, dist: s.distance })),
+    };
+  }
 }
 
 /** OSRM — live routing against a self-hosted server with foot/bike profiles. */
@@ -76,6 +93,19 @@ export class OsrmProvider {
       steps: (r.legs?.[0]?.steps || []).map((s) => ({ text: `${s.maneuver?.type || 'Continue'} ${s.name ? 'onto ' + s.name : ''}`.trim(), dist: s.distance })),
     }));
     return { provider: this.name, routes };
+  }
+  async leg(from, to, mode) {
+    const url = `${this.base}/route/v1/${OSRM_PROFILES[mode]}/${from[1]},${from[0]};${to[1]},${to[0]}?alternatives=false&overview=full&geometries=geojson&steps=true`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error(`Routing failed (${res.status})`);
+    const json = await res.json();
+    const r = json.routes?.[0];
+    if (json.code !== 'Ok' || !r) throw new Error('No route');
+    return {
+      geometry: r.geometry.coordinates.map(([lng, lat]) => [lat, lng]), distanceM: r.distance,
+      durationS: mode === 'scooter' ? r.distance / MODES.scooter.speed : r.duration,
+      steps: (r.legs?.[0]?.steps || []).map((s) => ({ text: `${s.maneuver?.type || 'Continue'} ${s.name ? 'onto ' + s.name : ''}`.trim(), dist: s.distance })),
+    };
   }
 }
 
