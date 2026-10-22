@@ -38,18 +38,18 @@ export class OverpassStreetlightProvider {
     const q = `[out:json][timeout:12];node["highway"="street_lamp"](${b.south},${b.west},${b.north},${b.east});out 2000;`;
     let json = null, lastErr = null;
     for (const url of this.urls) {
-      const timer = setTimeout(() => this.controller.abort(), 15000);
+      const timer = setTimeout(() => this.controller.abort(), 8000);
       try {
         const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: this.controller.signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-        if (!res.ok) throw new Error(`Streetlight data unavailable (${res.status})`);
+        if (!res.ok) throw new Error(res.status === 429 ? 'the OpenStreetMap lamp server is at capacity' : `HTTP ${res.status}`);
         json = await res.json(); break;
       } catch (e) {
-        lastErr = e;
+        lastErr = e.name === 'AbortError' ? new Error('no response within 8 s') : e;
         if (e.name === 'AbortError' && !this.controller.signal.aborted) throw e; // superseded by a newer request
         this.controller = new AbortController(); // fresh controller for the next mirror
       } finally { clearTimeout(timer); }
     }
-    if (!json) throw new Error('Streetlight servers are busy right now — ' + (lastErr?.message || 'no response') + '. Try again in a minute.');
+    if (!json) throw new Error('Lamp positions are unavailable right now (' + (lastErr?.message || 'no response') + '). Lighting is shown as "no data" — nothing is assumed. Try again in a few minutes.');
     const lamps = (json.elements || []).map((n) => ({ id: 'osm-' + n.id, lat: n.lat, lng: n.lon, source: 'osm', ref: n.tags?.ref || null }));
     this.cache.set(k, { at: Date.now(), lamps });
     return lamps;
