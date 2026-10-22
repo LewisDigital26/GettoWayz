@@ -9,13 +9,14 @@ export function alertsNearRoute(alerts, geometry, metres = 40) {
   return alerts.filter((a) => distanceToLine([a.lat, a.lng], geometry) <= metres);
 }
 
-export function openReportFlow(ctx, [lat, lng], { fromGps = false } = {}) {
-  let category = null;
+export function openReportFlow(ctx, [lat, lng], { fromGps = false, preset = null, lamp = false } = {}) {
+  let category = preset;
   const note = el('textarea', { placeholder: 'What should people know? (optional, no personal details)', maxlength: '240' });
   const grid = el('div', { class: 'catgrid' });
-  const submit = el('button', { class: 'btn primary block', disabled: true }, 'Submit report');
+  const submit = el('button', { class: 'btn primary block', disabled: !preset }, 'Submit report');
   for (const [key, c] of Object.entries(ALERT_CATEGORIES)) {
-    const b = el('button', { class: 'catbtn', onclick: () => { category = key; [...grid.children].forEach((x) => x.classList.toggle('selected', x === b)); submit.disabled = false; } },
+    if (!!c.lamp !== lamp) continue; // lamp categories only from a lamp; others only from the map
+    const b = el('button', { class: `catbtn ${key === preset ? 'selected' : ''}`, onclick: () => { category = key; [...grid.children].forEach((x) => x.classList.toggle('selected', x === b)); submit.disabled = false; } },
       el('span', { class: 'emoji' }, c.emoji), el('div', {}, el('div', { class: 't' }, c.label), el('div', { class: 's' }, c.desc)));
     grid.append(b);
   }
@@ -31,8 +32,8 @@ export function openReportFlow(ctx, [lat, lng], { fromGps = false } = {}) {
       submit.disabled = false; submit.textContent = 'Submit report';
     }
   });
-  openModal('Report an issue', [
-    el('p', { class: 'muted small' }, fromGps
+  openModal(lamp ? 'Report this streetlight' : 'Report an issue', [
+    lamp ? el('p', { class: 'muted small' }, 'Attached to the lamp you tapped. Reports expire automatically; points only if verified or confirmed by others.') : el('p', { class: 'muted small' }, fromGps
       ? 'Pinned at your current position (rounded). Your identity and live location are not shown to other users.'
       : `Pinned at ${lat.toFixed(4)}, ${lng.toFixed(4)}. Your identity is not shown to other users.`),
     grid,
