@@ -15,11 +15,18 @@ import { startSuggestPath, openPathDetail } from './ui/paths.js';
 import { openAccount, requireSignIn, updateAvatar, openAppearance } from './ui/account.js';
 import { createRealtime } from './providers/realtime.js';
 import { openFriends, openShareTrip, openCheckIn, renderShareBanner, openShareViewer, freshness } from './ui/friends.js';
+import { createStreetlightProvider } from './providers/streetlights.js';
+import { Streetlights, lightingBlock } from './ui/streetlights.js';
+import { STREETLIGHTS } from './backend/rules.js';
 
 // ---------- services ----------
 export const ctx = {
   backend: createBackend(),
   routing: createRoutingProvider(),
+  streetlights: createStreetlightProvider(),
+  lights: null,               // Streetlights controller (set after map init)
+  preferLit: false,           // user preference: rank routes by confirmed lighting (night only)
+  rerenderRouteSheet: () => { if (state.destination && state.routes.length) renderRouteSheet(); },
   geocoder: createGeocoder(),
   map: null,
   realtime: null,
@@ -54,6 +61,7 @@ ctx.map = new GwMap($('#map'), {
 await Promise.race([ctx.backend.ready || Promise.resolve(), new Promise((r) => setTimeout(r, 6000))]); // never block the UI on auth
 set({ user: ctx.backend.currentUser() });
 ctx.backend.onChange(() => { set({ user: ctx.backend.currentUser() }); refreshData(); });
+ctx.lights = new Streetlights(ctx);
 ctx.realtime = await createRealtime(ctx.backend);
 ctx.realtime.onUpdate(refreshShares);
 updateAvatar();
@@ -96,6 +104,7 @@ async function refreshData() {
   set({ alerts, paths });
   ctx.map.renderAlerts(alerts);
   ctx.map.renderPaths(paths, { showPending: state.layers.pending, myId: state.user?.id });
+  if (ctx.lights?.visible()) ctx.lights.render();
   updateAvatar();
   if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome();
   refreshShares();
@@ -306,8 +315,10 @@ async function planRoute() {
     if (haversine([origin.lat, origin.lng], [dest.lat, dest.lng]) < 15) throw new Error('You are already there.');
     const result = await ctx.routing.route({ from: [origin.lat, origin.lng], to: [dest.lat, dest.lng], mode: state.mode });
     if (state.destination !== dest) return; // stale
+    if (result.unsupported) throw new Error(result.unsupported);
     const routes = annotateRoutes(result.routes);
     set({ routes, routeProvider: result.provider, selectedRouteId: routes[0]?.id || null, routing: false });
+    scoreLighting(routes).then(() => { if (state.routes === routes) { applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } });
   } catch (e) {
     set({ routing: false, routeError: e.message || 'Routing failed' });
   }
@@ -340,6 +351,28 @@ function annotateRoutes(routes) {
   return routes;
 }
 
+/** Score each route's lighting (needs lamp data for the route area). Runs after routes are shown so routing is never delayed. */
+async function scoreLighting(routes) {
+  if (!ctx.lights || !ctx.streetlights) return;
+  for (const r of routes) { if (r.source === 'estimate') continue; r.lighting = await ctx.lights.scoreRoute(r); }
+}
+/** The "prefer confirmed-lit" option only exists at night and only when some route actually has enough confirmed coverage. */
+function litPreferenceAvailable() {
+  if (!ctx.lights?.isNight) return false;
+  return state.routes.some((r) => r.lighting?.covered && r.lighting.pct.confirmed >= STREETLIGHTS.preferLitMinConfirmedPct);
+}
+function applyLitPreference() {
+  const scored = state.routes.filter((r) => r.lighting?.covered);
+  if (!scored.length) return;
+  const best = scored.reduce((a, b) => (a.lighting.pct.confirmed >= b.lighting.pct.confirmed ? a : b));
+  for (const r of state.routes) if (r.label === 'Most confirmed lighting') r.label = 'Alternative';
+  if (best.lighting.pct.confirmed >= STREETLIGHTS.preferLitMinConfirmedPct && state.routes.length > 1 && best.label !== 'Quickest' && best.label !== 'More verified paths') best.label = 'Most confirmed lighting';
+  if (ctx.preferLit && litPreferenceAvailable()) {
+    state.routes.sort((a, b) => (b.lighting?.pct.confirmed || 0) - (a.lighting?.pct.confirmed || 0));
+    set({ selectedRouteId: state.routes[0].id });
+  }
+}
+
 function selectRoute(id) {
   set({ selectedRouteId: id });
   ctx.map.renderRoutes(state.routes, id, state.mode, selectRoute);
@@ -364,7 +397,9 @@ function renderRouteSheet() {
     el('div', {},
       el('div', { class: 'label' }, rt.label, el('span', { class: `chip ${rt.source}` }, rt.source === 'live' ? 'Live' : rt.source === 'sample' ? 'Sample' : 'Estimate'),
         rt.communityPathIds.length ? el('span', { class: 'chip verified' }, `${rt.communityPathIds.length} community path${rt.communityPathIds.length > 1 ? 's' : ''}`) : null,
-        rt.alertsNear.length ? el('span', { class: 'chip pending' }, `${rt.alertsNear.length} alert${rt.alertsNear.length > 1 ? 's' : ''}`) : null),
+        rt.alertsNear.length ? el('span', { class: 'chip pending' }, `${rt.alertsNear.length} alert${rt.alertsNear.length > 1 ? 's' : ''}`) : null,
+        rt.lighting?.covered ? el('span', { class: 'chip', style: 'color:#ffd34d;border-color:#ffd34d' }, `🔦 ${rt.lighting.pct.confirmed}% lit·confirmed`) : null,
+        state.mode === 'drive' && rt.source === 'live' ? el('span', { class: 'chip' }, 'No live traffic') : null),
       el('div', { class: 'basis' }, labelBasis(rt))),
     el('div', { class: 'stats' }, el('strong', {}, fmtDuration(rt.durationS)), el('span', {}, fmtDistance(rt.distanceM))))));
 
@@ -374,8 +409,13 @@ function renderRouteSheet() {
 
   const steps = el('ul', { class: 'steps' }, ...r.steps.map((s, i) => el('li', {}, el('span', { class: 'ic' }, i === r.steps.length - 1 ? '🏁' : '→'), el('span', {}, s.text), el('span', { class: 'd' }, fmtDistance(s.dist)))));
 
-  renderSheet([head, cards,
+  const litToggle = litPreferenceAvailable() ? el('label', { class: 'row', style: 'gap:10px;margin:6px 0' },
+    el('input', { type: 'checkbox', checked: ctx.preferLit, onchange: (e) => { ctx.preferLit = e.target.checked; applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } }),
+    el('span', { class: 'small' }, el('strong', {}, 'Prefer routes with confirmed lighting'), ' — ranks by lamps recently reported working. Not a safety rating.')) : null;
+  ctx.map.renderLightingOverlay(ctx.lights?.visible() ? r.lighting?.segments : null);
+  renderSheet([head, cards, litToggle,
     el('div', { class: `notice ${r.source === 'estimate' ? 'warn' : 'info'}` }, r.basis),
+    ctx.streetlights ? lightingBlock(r.lighting, { night: !!ctx.lights?.isNight }) : null,
     el('div', { class: 'row', style: 'margin:10px 0' },
       el('button', { class: 'btn primary block', onclick: startNavigation }, r.source === 'estimate' ? 'Start (estimate only)' : 'Start navigation'),
       el('button', { class: 'btn', onclick: () => { ctx.pickingOrigin = true; toast('Tap the map to choose a new start point'); } }, 'Start point')),
@@ -387,6 +427,7 @@ function renderRouteSheet() {
 function labelBasis(rt) {
   if (rt.label === 'Quickest') return 'Shortest estimated time for this mode.';
   if (rt.label === 'More verified paths') return 'Uses more moderator-approved community paths. Approval means the path is on the map — not a safety rating.';
+  if (rt.label === 'Most confirmed lighting') return 'Highest share of lamps recently confirmed working by the community. Not a safety guarantee.';
   if (rt.source === 'estimate') return 'Straight-line estimate — no real path data.';
   return 'Alternative route from the routing provider.';
 }
@@ -416,8 +457,12 @@ function beginNavigation(r) {
   set({ navigating: true });
   hideSheet(true);
   $('#navbar').hidden = false; $('#fabs').hidden = true; $('#modebar').hidden = true; $('.topbar').hidden = true;
+  $('#navbar').classList.toggle('driving', state.mode === 'drive');
   ctx.map.renderRoutes([r], r.id, state.mode, () => {});
+  ctx.map.renderLightingOverlay(ctx.lights?.visible() ? r.lighting?.segments : null);
   $('#endNavBtn').onclick = endNavigation;
+  setupVoice();
+  lastSpokenStep = -1;
   if (state.position) { onNavTick(state.position); locate({ follow: true }); }
   else {
     openModal('Follow along?', [
@@ -443,6 +488,8 @@ let arrivedShown = false;
 function exitNavigationUi() {
   set({ navigating: false });
   $('#navbar').hidden = true; $('#fabs').hidden = false; $('#modebar').hidden = false; $('.topbar').hidden = false;
+  $('#navbar').classList.remove('driving');
+  stopVoice();
   hideSheet(false);
   ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute);
   renderRouteSheet();
@@ -452,11 +499,32 @@ function showStep(i, r, remainingM) {
   $('#navInstr').textContent = step?.text || 'Continue';
   $('#navSub').textContent = step ? `${fmtDistance(step.dist)} · step ${Math.min(i, r.steps.length - 1) + 1} of ${r.steps.length}` : '';
   $('#navIcon').textContent = /left/i.test(step?.text) ? '↰' : /right/i.test(step?.text) ? '↱' : i >= r.steps.length - 1 ? '🏁' : '↑';
+  speakStep(Math.min(i, r.steps.length - 1), step);
   const rem = remainingM ?? r.distanceM;
   $('#navRemain').textContent = `${fmtDistance(rem)} left`;
   const eta = new Date(Date.now() + (rem / MODES[state.mode].speed) * 1000);
   $('#navEta').textContent = `${eta.getHours()}:${String(eta.getMinutes()).padStart(2, '0')}`;
 }
+// ---------- voice guidance (browser SpeechSynthesis; offered only where the browser supports it) ----------
+let voiceOn = false, lastSpokenStep = -1;
+const speechOk = () => 'speechSynthesis' in window && typeof SpeechSynthesisUtterance !== 'undefined';
+function setupVoice() {
+  const b = $('#voiceBtn');
+  if (!speechOk()) { b.hidden = true; return; }
+  b.hidden = false;
+  // default voice on for driving (hands stay on the wheel), off otherwise; user can toggle either way
+  voiceOn = state.mode === 'drive';
+  renderVoiceBtn();
+  b.onclick = () => { voiceOn = !voiceOn; renderVoiceBtn(); if (voiceOn) { lastSpokenStep = -1; const r = selectedRoute(); if (r) speakStep(0, r.steps[0]); } else speechSynthesis.cancel(); };
+}
+function renderVoiceBtn() { const b = $('#voiceBtn'); b.textContent = voiceOn ? '🔊 Voice' : '🔇 Voice'; b.setAttribute('aria-pressed', String(voiceOn)); }
+function speakStep(i, step) {
+  if (!voiceOn || !speechOk() || !step || i === lastSpokenStep) return;
+  lastSpokenStep = i;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(`${step.text}. ${fmtDistance(step.dist)}`); u.lang = 'en-GB'; u.rate = 1; speechSynthesis.speak(u); } catch { /* ignore */ }
+}
+function stopVoice() { if (speechOk()) try { speechSynthesis.cancel(); } catch { /* ignore */ } }
+
 function onNavTick(pos) {
   const r = selectedRoute(); if (!r) return;
   const me = [pos.lat, pos.lng];
