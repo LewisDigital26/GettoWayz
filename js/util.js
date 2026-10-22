@@ -109,4 +109,37 @@ export const MODES = {
   walk: { label: 'Walk', emoji: '🚶', speed: 1.35, color: 'var(--route-walk)', get hex() { return cssVar('--route-walk'); } },
   bike: { label: 'Bike', emoji: '🚲', speed: 4.2, color: 'var(--route-bike)', get hex() { return cssVar('--route-bike'); } },
   scooter: { label: 'Scooter', emoji: '🛴', speed: 3.6, color: 'var(--route-scooter)', get hex() { return cssVar('--route-scooter'); } },
+  drive: { label: 'Drive', emoji: '🚗', speed: 11, color: 'var(--route-drive)', get hex() { return cssVar('--route-drive'); } },
 };
+
+/**
+ * Sunrise / sunset for a date and location (NOAA solar equations, accurate to a few minutes).
+ * Computed locally — no network, no stored location. Returns Date objects in local time plus isNight.
+ */
+export function sunTimes(date, lat, lng) {
+  const rad = Math.PI / 180;
+  const dayMs = 86400000;
+  const J1970 = 2440588, J2000 = 2451545;
+  const toJulian = (d) => d.valueOf() / dayMs - 0.5 + J1970;
+  const fromJulian = (j) => new Date((j + 0.5 - J1970) * dayMs);
+  const d = toJulian(date) - J2000;
+  const lw = rad * -lng, phi = rad * lat;
+  const n = Math.round(d - 0.0009 - lw / (2 * Math.PI));
+  const ds = 0.0009 + lw / (2 * Math.PI) + n;
+  const M = rad * (357.5291 + 0.98560028 * ds);
+  const C = rad * (1.9148 * Math.sin(M) + 0.02 * Math.sin(2 * M) + 0.0003 * Math.sin(3 * M));
+  const P = rad * 102.9372;
+  const L = M + C + P + Math.PI;
+  const dec = Math.asin(Math.sin(L) * Math.sin(rad * 23.4397));
+  const Jnoon = J2000 + ds + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const h0 = rad * -0.833; // standard sunrise/sunset angle incl. refraction
+  const cosH = (Math.sin(h0) - Math.sin(phi) * Math.sin(dec)) / (Math.cos(phi) * Math.cos(dec));
+  if (cosH <= -1) return { sunrise: null, sunset: null, polar: 'day', isNight: false };
+  if (cosH >= 1) return { sunrise: null, sunset: null, polar: 'night', isNight: true };
+  const w = Math.acos(cosH);
+  const Jset = J2000 + (ds + w / (2 * Math.PI)) + 0.0053 * Math.sin(M) - 0.0069 * Math.sin(2 * L);
+  const Jrise = Jnoon - (Jset - Jnoon);
+  const sunrise = fromJulian(Jrise), sunset = fromJulian(Jset);
+  const now = date.valueOf();
+  return { sunrise, sunset, isNight: now < sunrise.valueOf() || now > sunset.valueOf() };
+}
