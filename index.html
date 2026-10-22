@@ -48,6 +48,7 @@
       <button role="tab" data-mode="walk" aria-selected="true">🚶 Walk</button>
       <button role="tab" data-mode="bike" aria-selected="false">🚲 Bike</button>
       <button role="tab" data-mode="scooter" aria-selected="false">🛴 Scooter</button>
+      <button role="tab" data-mode="drive" aria-selected="false">🚗 Drive</button>
     </div>
 
     <!-- MAP CONTROLS -->
@@ -86,6 +87,19 @@
       <label><input type="checkbox" id="layerAlerts" checked /> Community alerts</label>
       <label><input type="checkbox" id="layerPaths" checked /> Community-added paths</label>
       <label><input type="checkbox" id="layerPending" /> My pending suggestions</label>
+      <div class="popover-sep"></div>
+      <div class="popover-title">🔦 Streetlights <span id="nightBadge" class="chip" hidden></span></div>
+      <div class="segmented" id="lightsMode" role="radiogroup" aria-label="Streetlight layer">
+        <button data-v="auto" aria-checked="true">Auto (night)</button>
+        <button data-v="on" aria-checked="false">On</button>
+        <button data-v="off" aria-checked="false">Off</button>
+      </div>
+      <div class="small muted" id="lightsNote" style="padding:4px 10px 2px"></div>
+      <div class="legend" id="lightsLegend" hidden>
+        <span><i class="lamp-dot working"></i> Confirmed working</span>
+        <span><i class="lamp-dot out"></i> Reported out</span>
+        <span><i class="lamp-dot unknown"></i> Unknown</span>
+      </div>
     </div>
 
     <!-- BOTTOM SHEET -->
@@ -105,7 +119,10 @@
       </div>
       <div class="navbar-foot">
         <div><strong id="navEta">—</strong> <span class="muted" id="navRemain">—</span></div>
-        <button class="btn danger" id="endNavBtn">End</button>
+        <div class="row">
+          <button class="btn" id="voiceBtn" aria-pressed="false" hidden>🔇 Voice</button>
+          <button class="btn danger" id="endNavBtn">End</button>
+        </div>
       </div>
     </div>
 
