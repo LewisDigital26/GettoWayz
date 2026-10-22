@@ -10,7 +10,8 @@ const wrap = (e) => new BackendError(e.code || 'db', (e.message || 'Request fail
 export class SupabaseBackend {
   constructor({ url, anonKey }) {
     if (!window.supabase) throw new Error('supabase-js is not loaded');
-    this.sb = supabase.createClient(url, anonKey);
+        // No cross-tab auth lock: the default Web Lock lets one stuck tab freeze every other tab on the site.
+        this.sb = supabase.createClient(url, anonKey, { auth: { lock: (_name, _timeout, fn) => fn() } });
     this.kind = 'supabase';
     this.isShared = true;
     this.authMode = 'email';
