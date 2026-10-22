@@ -28,11 +28,12 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --font-display: "Syne", "DM Sans", system-ui, sans-serif;
   --font-body: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-  --map-filter: none;
+    --map-filter: invert(1) hue-rotate(180deg) brightness(.72) contrast(1.05) saturate(.55);
   color-scheme: dark;
 }
 /* Colourway B — "Deep Navy": the logo's navy as the whole ground, lime + teal pops. */
 :root[data-colourway="navy"] {
+  --map-filter: invert(1) hue-rotate(200deg) brightness(.68) contrast(1.08) saturate(.6);
   --bg: #141c33; --bg-2: #202b47; --bg-3: #2b3860; --line: #3d4b78;
   --text: #f4f7ff; --text-2: #b3bdd8; --text-3: #7a86a8;
   --accent: #aaf129; --accent-ink: #14201a; --route-walk: #aaf129; --route-bike: #2bb190; --route-scooter: #ffb800;
@@ -52,6 +53,7 @@
 :root[data-colourway="day"] .leaflet-control-attribution a { color: #15203a !important; }
 :root[data-colourway="day"] .map, :root[data-colourway="day"] .leaflet-container { background: #dfe5ee; }
 :root[data-colourway="day"] .status-strip { background: rgba(183,127,0,.12); }
+:root[data-colourway="day"] .leaflet-tile-pane { filter: none; }
 
 * { box-sizing: border-box; }
 html, body { height: 100%; margin: 0; }
@@ -77,6 +79,7 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
 .app { position: fixed; inset: 0; }
 .map { position: absolute; inset: 0; background: #11131a; }
 .leaflet-container { background: #11131a; font-family: var(--font-body); }
+.leaflet-tile-pane { filter: var(--map-filter); }
 .leaflet-control-attribution {
   background: rgba(11,12,16,.75) !important; color: var(--text-2) !important;
   font-size: 10px; backdrop-filter: blur(6px); padding: 2px 6px;
