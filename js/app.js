@@ -18,6 +18,7 @@ import { openFriends, openShareTrip, openCheckIn, renderShareBanner, openShareVi
 import { createStreetlightProvider } from './providers/streetlights.js';
 import { Streetlights, lightingBlock } from './ui/streetlights.js';
 import { STREETLIGHTS } from './backend/rules.js';
+import { communityRoutes } from './providers/communityRouting.js';
 
 // ---------- services ----------
 export const ctx = {
@@ -123,7 +124,7 @@ function showHome() {
       el('h2', {}, 'Where to?'),
       el('span', { class: `chip ${live ? 'live' : 'sample'}` }, live ? 'Live routing' : 'Sample routes')),
     el('p', { class: 'muted small', style: 'margin:0 0 10px' },
-      live ? 'Routes use public ways from OpenStreetMap. Community paths show once moderators approve them.'
+      live ? 'Routes use public ways from OpenStreetMap, plus moderator-approved community paths whenever they make a trip quicker.'
            : 'No routing key is configured, so routes between these sample places are hand-made examples. Other destinations get a labelled straight-line estimate.'),
     el('div', { class: 'row wrap', style: 'margin-bottom:12px' },
       ...quick.map((p) => el('button', { class: 'btn sm', onclick: () => setDestination({ ...p, source: 'sample' }) }, p.kind === 'park' ? '🌳' : p.kind === 'transport' ? '🚉' : '📍', ' ', p.name.replace('Coventry ', '')))),
@@ -318,12 +319,30 @@ async function planRoute() {
     if (result.unsupported) throw new Error(result.unsupported);
     const routes = annotateRoutes(result.routes);
     set({ routes, routeProvider: result.provider, selectedRouteId: routes[0]?.id || null, routing: false });
-    scoreLighting(routes).then(() => { if (state.routes === routes) { applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } });
+    addCommunityRoutes(routes, [origin.lat, origin.lng], [dest.lat, dest.lng], state.mode)
+      .then((latest) => scoreLighting(latest).then(() => latest))
+      .then((latest) => { if (state.routes === latest && !state.navigating) { applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } });
   } catch (e) {
     set({ routing: false, routeError: e.message || 'Routing failed' });
   }
   ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute);
   renderRouteSheet();
+}
+
+/**
+ * Ask the routing engine for legs to/from nearby approved community paths and add a stitched route when it helps.
+ * Runs after the engine's routes are shown, so routing is never delayed. Returns the route list now in state.
+ */
+async function addCommunityRoutes(routes, from, to, mode) {
+  if (!state.paths.some((p) => p.status === 'approved')) return routes;
+  const extra = await communityRoutes({ routing: ctx.routing, from, to, mode, paths: state.paths, base: routes }).catch(() => []);
+  if (!extra.length || state.routes !== routes || state.navigating) return state.routes;
+  const keepSelection = state.selectedRouteId !== routes[0]?.id; // user already picked one — don't move it
+  const all = annotateRoutes([...routes, ...extra]).sort((a, b) => a.durationS - b.durationS);
+  set({ routes: all, selectedRouteId: keepSelection ? state.selectedRouteId : all[0].id });
+  ctx.map.renderRoutes(all, state.selectedRouteId, state.mode, selectRoute, { fit: false });
+  renderRouteSheet();
+  return all;
 }
 
 /** Adds community-path coverage, nearby alerts and friendly labels to each route. */
@@ -342,11 +361,13 @@ function annotateRoutes(routes) {
   const mostPaths = withPaths.length && routes.length > 1 ? withPaths.reduce((a, b) => (a.communityPathIds.length >= b.communityPathIds.length ? a : b)) : null;
   const rest = routes.filter((r) => r !== mostPaths && r.source !== 'estimate');
   const fastest = rest.length ? rest.reduce((a, b) => (a.durationS <= b.durationS ? a : b)) : null;
+  const fastestAll = routes.filter((r) => r.source !== 'estimate').reduce((a, b) => (!a || b.durationS < a.durationS ? b : a), null);
   for (const r of routes) {
     if (r.source === 'estimate') continue;
-    if (r === mostPaths) r.label = 'More verified paths';
-    else if (r === fastest) r.label = 'Quickest';
-    else if (r.label === 'Quickest' || r.label === 'More verified paths') r.label = 'Alternative';
+    if (r === mostPaths && r === fastestAll && r.viaCommunity) r.label = 'Community shortcut';
+    else if (r === mostPaths) r.label = 'More verified paths';
+    else if (r === fastest) r.label = mostPaths && mostPaths === fastestAll && mostPaths.viaCommunity ? 'Mapped streets only' : 'Quickest';
+    else if (['Quickest', 'More verified paths', 'Community shortcut', 'Mapped streets only'].includes(r.label)) r.label = 'Alternative';
   }
   return routes;
 }
@@ -366,7 +387,7 @@ function applyLitPreference() {
   if (!scored.length) return;
   const best = scored.reduce((a, b) => (a.lighting.pct.confirmed >= b.lighting.pct.confirmed ? a : b));
   for (const r of state.routes) if (r.label === 'Most confirmed lighting') r.label = 'Alternative';
-  if (best.lighting.pct.confirmed >= STREETLIGHTS.preferLitMinConfirmedPct && state.routes.length > 1 && best.label !== 'Quickest' && best.label !== 'More verified paths') best.label = 'Most confirmed lighting';
+  if (best.lighting.pct.confirmed >= STREETLIGHTS.preferLitMinConfirmedPct && state.routes.length > 1 && !['Quickest', 'More verified paths', 'Community shortcut', 'Mapped streets only'].includes(best.label)) best.label = 'Most confirmed lighting';
   if (ctx.preferLit && litPreferenceAvailable()) {
     state.routes.sort((a, b) => (b.lighting?.pct.confirmed || 0) - (a.lighting?.pct.confirmed || 0));
     set({ selectedRouteId: state.routes[0].id });
@@ -407,7 +428,7 @@ function renderRouteSheet() {
     ? el('div', {}, el('h3', { style: 'font-size:14px;margin:8px 0 6px' }, 'Alerts along this route'), el('div', { class: 'list' }, ...r.alertsNear.map(alertRow)))
     : null;
 
-  const steps = el('ul', { class: 'steps' }, ...r.steps.map((s, i) => el('li', {}, el('span', { class: 'ic' }, i === r.steps.length - 1 ? '🏁' : '→'), el('span', {}, s.text), el('span', { class: 'd' }, fmtDistance(s.dist)))));
+  const steps = el('ul', { class: 'steps' }, ...r.steps.map((s, i) => el('li', {}, el('span', { class: 'ic' }, i === r.steps.length - 1 ? '🏁' : s.community ? '🟢' : '→'), el('span', {}, s.text), el('span', { class: 'd' }, fmtDistance(s.dist)))));
 
   const litToggle = litPreferenceAvailable() ? el('label', { class: 'row', style: 'gap:10px;margin:6px 0' },
     el('input', { type: 'checkbox', checked: ctx.preferLit, onchange: (e) => { ctx.preferLit = e.target.checked; applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } }),
@@ -426,8 +447,11 @@ function renderRouteSheet() {
 }
 function labelBasis(rt) {
   if (rt.label === 'Quickest') return 'Shortest estimated time for this mode.';
+  if (rt.label === 'Community shortcut') return 'Quickest option, thanks to a moderator-approved community path the map engine doesn’t know about yet.';
   if (rt.label === 'More verified paths') return 'Uses more moderator-approved community paths. Approval means the path is on the map — not a safety rating.';
   if (rt.label === 'Most confirmed lighting') return 'Highest share of lamps recently confirmed working by the community. Not a safety guarantee.';
+  if (rt.label === 'Mapped streets only') return 'Quickest route using only ways already in OpenStreetMap.';
+  if (rt.viaCommunity) return 'Uses a moderator-approved community path. Approval means the path is on the map — not a safety rating.';
   if (rt.source === 'estimate') return 'Straight-line estimate — no real path data.';
   return 'Alternative route from the routing provider.';
 }
