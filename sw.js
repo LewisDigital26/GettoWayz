@@ -1,10 +1,10 @@
-/* Ghetto Wayz service worker - caches the app shell for offline launch.
+/* Ghetto Wayz service worker — caches the app shell for offline launch.
    Map tiles, routing and search are network-only (never cached as "live"). */
-const CACHE = 'gw-shell-v5';
+const CACHE = 'gw-shell-v6';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest', './icons/icon.svg',
   './js/app.js', './js/config.js', './js/util.js', './js/map.js', './js/state.js',
-  './js/providers/routing.js', './js/providers/geocoding.js', './js/providers/sampleData.js', './js/providers/realtime.js', './js/providers/streetlights.js',
+  './js/providers/routing.js', './js/providers/geocoding.js', './js/providers/sampleData.js', './js/providers/realtime.js', './js/providers/streetlights.js', './js/providers/communityRouting.js',
   './js/backend/index.js', './js/backend/localDemo.js', './js/backend/seed.js', './js/backend/rules.js', './js/backend/social.js', './js/backend/supabase.js',
   './js/ui/sheet.js', './js/ui/modal.js', './js/ui/alerts.js', './js/ui/paths.js', './js/ui/account.js', './js/ui/admin.js', './js/ui/friends.js', './js/ui/streetlights.js', './icons/logo-96.png', './icons/wordmark.jpg'
 ];
