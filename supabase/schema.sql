@@ -83,7 +83,7 @@ end $$;
 -- =====================================================================
 create table if not exists alerts (
   id uuid primary key default gen_random_uuid(),
-  category text not null check (category in ('blocked','pothole','lighting','closure','flooding','other')),
+    category text not null check (category in ('blocked','pothole','lighting','closure','flooding','other','light_out','light_ok')),
   lat double precision not null, lng double precision not null,
   note text not null default '' check (length(note) <= 240),
   status text not null default 'pending' check (status in ('pending','verified','rejected','resolved')),
@@ -106,8 +106,8 @@ declare me uuid := auth.uid(); days int; a alerts;
 begin
   if me is null then raise exception 'Sign in to do this.'; end if;
   if (select count(*) from alerts where created_by = me and created_at::date = current_date) >= 5 then raise exception 'Limit reached: 5 reports per day.'; end if;
-  if exists (select 1 from alerts where created_by = me and status = 'pending' and gw_haversine(lat, lng, p_lat, p_lng) < 25) then raise exception 'You already have a pending report at this spot.'; end if;
-  days := case p_category when 'blocked' then 7 when 'pothole' then 30 when 'lighting' then 60 when 'closure' then 14 when 'flooding' then 3 else 14 end;
+    if exists (select 1 from alerts where created_by = me and status = 'pending' and category = p_category and gw_haversine(lat, lng, p_lat, p_lng) < 25) then raise exception 'You already have a pending report at this spot.'; end if;
+    days := case p_category when 'blocked' then 7 when 'pothole' then 30 when 'lighting' then 60 when 'closure' then 14 when 'flooding' then 3 when 'light_out' then 30 when 'light_ok' then 14 else 14 end;
   insert into alerts (category, lat, lng, note, created_by, expires_at)
     values (p_category, round(p_lat::numeric, 5), round(p_lng::numeric, 5), left(coalesce(p_note, ''), 240), me, now() + (days || ' days')::interval)
     returning * into a;
