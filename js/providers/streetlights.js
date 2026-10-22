@@ -20,7 +20,8 @@ export class OverpassStreetlightProvider {
   constructor(url) {
     this.name = 'overpass';
     this.isLive = true;
-    this.url = url || 'https://overpass-api.de/api/interpreter';
+    // Primary + public mirrors; tried in order with a timeout each. A custom OVERPASS_URL is used alone.
+    this.urls = url ? [url] : ['https://overpass-api.de/api/interpreter', 'https://overpass.kumi.systems/api/interpreter', 'https://overpass.private.coffee/api/interpreter'];
     this.note = 'Lamp positions from OpenStreetMap (mapped by volunteers; coverage varies by area). Working status comes only from community reports.';
     this.cache = new Map(); // bbox key → { at, lamps }
     this.controller = null;
@@ -34,10 +35,21 @@ export class OverpassStreetlightProvider {
     if (haversine([b.south, b.west], [b.north, b.east]) > 8000) throw new Error('Zoom in to load streetlights for this area.');
     this.controller?.abort();
     this.controller = new AbortController();
-    const q = `[out:json][timeout:15];node["highway"="street_lamp"](${b.south},${b.west},${b.north},${b.east});out 2000;`;
-    const res = await fetch(this.url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: this.controller.signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
-    if (!res.ok) throw new Error(`Streetlight data unavailable (${res.status})`);
-    const json = await res.json();
+    const q = `[out:json][timeout:12];node["highway"="street_lamp"](${b.south},${b.west},${b.north},${b.east});out 2000;`;
+    let json = null, lastErr = null;
+    for (const url of this.urls) {
+      const timer = setTimeout(() => this.controller.abort(), 15000);
+      try {
+        const res = await fetch(url, { method: 'POST', body: 'data=' + encodeURIComponent(q), signal: this.controller.signal, headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+        if (!res.ok) throw new Error(`Streetlight data unavailable (${res.status})`);
+        json = await res.json(); break;
+      } catch (e) {
+        lastErr = e;
+        if (e.name === 'AbortError' && !this.controller.signal.aborted) throw e; // superseded by a newer request
+        this.controller = new AbortController(); // fresh controller for the next mirror
+      } finally { clearTimeout(timer); }
+    }
+    if (!json) throw new Error('Streetlight servers are busy right now — ' + (lastErr?.message || 'no response') + '. Try again in a minute.');
     const lamps = (json.elements || []).map((n) => ({ id: 'osm-' + n.id, lat: n.lat, lng: n.lon, source: 'osm', ref: n.tags?.ref || null }));
     this.cache.set(k, { at: Date.now(), lamps });
     return lamps;
