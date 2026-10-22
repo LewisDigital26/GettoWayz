@@ -15,6 +15,7 @@
   --route-walk: #aaf129;
   --route-bike: #2bb190;
   --route-scooter: #4fc3ff;
+  --route-drive: #ff8a3d;
   --route-alt: #7b85a3;
   --verified: #2bb190;
   --pending: #ffb800;
@@ -28,7 +29,7 @@
   --sab: env(safe-area-inset-bottom, 0px);
   --font-display: "Syne", "DM Sans", system-ui, sans-serif;
   --font-body: "DM Sans", system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-    --map-filter: invert(1) hue-rotate(180deg) brightness(.72) contrast(1.05) saturate(.55);
+  --map-filter: invert(1) hue-rotate(180deg) brightness(.72) contrast(1.05) saturate(.55);
   color-scheme: dark;
 }
 /* Colourway B — "Deep Navy": the logo's navy as the whole ground, lime + teal pops. */
@@ -36,14 +37,14 @@
   --map-filter: invert(1) hue-rotate(200deg) brightness(.68) contrast(1.08) saturate(.6);
   --bg: #141c33; --bg-2: #202b47; --bg-3: #2b3860; --line: #3d4b78;
   --text: #f4f7ff; --text-2: #b3bdd8; --text-3: #7a86a8;
-  --accent: #aaf129; --accent-ink: #14201a; --route-walk: #aaf129; --route-bike: #2bb190; --route-scooter: #ffb800;
+  --accent: #aaf129; --accent-ink: #14201a; --route-walk: #aaf129; --route-bike: #2bb190; --route-scooter: #ffb800; --route-drive: #ff8a3d;
   --shadow: 0 10px 30px rgba(5,10,30,.6);
 }
 /* Colourway C — "Daylight": light ground for bright outdoor use, navy type, teal primary, lime highlights. */
 :root[data-colourway="day"] {
   --bg: #eef1f6; --bg-2: #ffffff; --bg-3: #e3e8f1; --line: #c9d1e0;
   --text: #15203a; --text-2: #4b5775; --text-3: #7f8aa6;
-  --accent: #2bb190; --accent-ink: #ffffff; --route-walk: #1f9a7c; --route-bike: #202b47; --route-scooter: #e0891a;
+  --accent: #2bb190; --accent-ink: #ffffff; --route-walk: #1f9a7c; --route-bike: #202b47; --route-scooter: #e0891a; --route-drive: #c2410c;
   --route-alt: #9aa5bf; --verified: #1f9a7c; --pending: #b77f00; --danger: #d6264a; --friend: #2a7fd4;
   --shadow: 0 8px 24px rgba(20,32,58,.14);
   --map-filter: none;
@@ -158,7 +159,7 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
   display: flex; flex-direction: column; gap: 8px;
 }
 .fabs {
-  position: absolute; z-index: 450; right: 12px; bottom: calc(var(--sheet-h, 150px) + 14px + var(--sab));
+  position: absolute; z-index: 450; right: 12px; bottom: min(calc(var(--sheet-h, 150px) + 14px + var(--sab)), calc(100% - 420px - var(--sat)));
   display: flex; flex-direction: column; gap: 8px; transition: bottom .25s ease;
 }
 .fab {
@@ -167,8 +168,8 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
 }
 .fab svg { width: 18px; height: 18px; fill: var(--accent); }
 .popover {
-  position: absolute; z-index: 460; right: 64px; top: calc(238px + var(--sat));
-  background: var(--bg-2); border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 8px 4px; min-width: 220px;
+  position: absolute; z-index: 495; right: 64px; top: calc(238px + var(--sat));
+  background: var(--bg-2); border-radius: var(--radius-sm); box-shadow: var(--shadow); padding: 8px 4px; min-width: 240px; max-width: calc(100vw - 80px); max-height: 60vh; overflow-y: auto;
 }
 .popover label { display: flex; gap: 10px; align-items: center; padding: 8px 10px; font-size: 14px; }
 .popover input { accent-color: var(--accent); width: 18px; height: 18px; }
@@ -382,3 +383,35 @@ body:has(.sharebanner:not([hidden])) .mapctl { top: calc(210px + var(--sat)); }
 .swatch .sw i { display: block; width: 14px; height: 14px; border-radius: 4px; }
 .swatch .t { font-weight: 700; font-size: 13px; } .swatch .s { font-size: 11px; color: var(--text-2); }
 .wordmark { display: block; width: 100%; max-width: 260px; margin: 0 auto 10px; border-radius: 12px; }
+
+/* ---------- Streetlights & night ---------- */
+.popover-sep { height: 1px; background: var(--line); margin: 6px 4px; }
+.popover-title { padding: 6px 10px 4px; font-weight: 700; font-size: 13px; display: flex; gap: 8px; align-items: center; }
+.segmented { display: flex; gap: 4px; padding: 2px 6px 4px; }
+.segmented button { flex: 1; border: 1px solid var(--line); background: var(--bg-3); border-radius: 9px; padding: 7px 4px; font-size: 12.5px; font-weight: 600; color: var(--text-2); }
+.segmented button[aria-checked="true"] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.legend { display: flex; flex-direction: column; gap: 4px; padding: 4px 10px 6px; font-size: 12px; color: var(--text-2); }
+.legend span { display: flex; align-items: center; gap: 8px; }
+.lamp-dot { display: inline-block; width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); box-shadow: 0 0 0 1px var(--line); }
+.lamp-dot.working { background: #ffd34d; box-shadow: 0 0 0 1px #ffd34d, 0 0 8px 2px rgba(255,211,77,.55); }
+.lamp-dot.out { background: #ff5a7a; }
+.lamp-dot.unknown { background: #8a93ad; }
+:root[data-colourway="day"] .lamp-dot.working { background: #e6a800; box-shadow: 0 0 0 1px #e6a800; }
+:root[data-colourway="day"] .lamp-dot.unknown { background: #6b7590; }
+.lamp-marker { width: 12px; height: 12px; border-radius: 50%; border: 2px solid var(--bg); cursor: pointer; }
+.lamp-marker.working { background: #ffd34d; box-shadow: 0 0 10px 3px rgba(255,211,77,.55); }
+.lamp-marker.out { background: #ff5a7a; box-shadow: 0 0 0 1px #ff5a7a; }
+.lamp-marker.unknown { background: #8a93ad; opacity: .85; }
+:root[data-colourway="day"] .lamp-marker.working { background: #e6a800; box-shadow: 0 0 6px 2px rgba(230,168,0,.4); }
+.lightbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg); margin: 6px 0 4px; }
+.lightbar i { display: block; height: 100%; }
+.lightbar .c { background: #ffd34d; } .lightbar .o { background: #ff5a7a; } .lightbar .u { background: #8a93ad; } .lightbar .n { background: transparent; }
+.lightkey { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
+.lightkey i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+.modebar button { padding: 0 10px; }
+/* Driving: bigger, calmer navigation bar; nothing to tap while moving except End */
+.navbar.driving .navbar-icon { width: 64px; height: 64px; font-size: 34px; }
+.navbar.driving .navbar-instr { font-size: 21px; }
+.navbar.driving .navbar-sub { font-size: 15px; }
+.navbar.driving .navbar-foot strong { font-size: 22px; }
+.navbar.driving .btn.danger { height: 52px; padding: 0 22px; font-size: 16px; }
