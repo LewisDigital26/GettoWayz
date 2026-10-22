@@ -1,6 +1,6 @@
 /* Ghetto Wayz service worker — caches the app shell for offline launch.
    Map tiles, routing and search are network-only (never cached as "live"). */
-const CACHE = 'gw-shell-v6';
+const CACHE = 'gw-shell-v7';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest', './icons/icon.svg',
   './js/app.js', './js/config.js', './js/util.js', './js/map.js', './js/state.js',
@@ -9,7 +9,7 @@ const SHELL = [
   './js/ui/sheet.js', './js/ui/modal.js', './js/ui/alerts.js', './js/ui/paths.js', './js/ui/account.js', './js/ui/admin.js', './js/ui/friends.js', './js/ui/streetlights.js', './icons/logo-96.png', './icons/wordmark.jpg'
 ];
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(SHELL.map((u) => new Request(u, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 self.addEventListener('activate', (e) => {
   e.waitUntil(caches.keys().then((keys) => Promise.all(keys.filter((k) => k !== CACHE).map((k) => caches.delete(k)))).then(() => self.clients.claim()));
