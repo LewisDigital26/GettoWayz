@@ -48,7 +48,7 @@ export const pointsMethods = {
     e.status = 'reversed';
     this.db.points.push({ id: 'pe-' + uid(), userId: e.userId, rule: 'reversal', points: -e.points, refType: 'point_entry', refId: e.id, at: iso(), status: 'reversal', reversalOf: e.id, reason: String(reason).slice(0, 300), actor: actorId, policyVersion: POLICY_VERSION });
     const u = this.db.users.find((x) => x.id === e.userId);
-    if (u && e.points > 0) u.points -= e.points; // level floor is kept
+    if (u && e.points) u.points = Math.max(0, u.points - e.points); // level floor is kept
     return e.points;
   },
 
@@ -209,6 +209,22 @@ export const pointsMethods = {
     const u = this.db.users.find((x) => x.alias.toLowerCase() === String(alias || '').trim().toLowerCase());
     if (!u) return null;
     return { id: u.id, alias: u.alias, points: u.points, levelFloor: u.levelFloor, entries: this.db.points.filter((e) => e.userId === u.id).sort((a, b) => new Date(b.at) - new Date(a.at)).slice(0, 100) };
+  },
+  /** Moderator adjustment (testing / corrections): logged, shown in the user's history, reversible. */
+  async adminGrantPoints(alias, points, reason) {
+    this.requireAdmin(); this._ensurePoints();
+    const p = Math.trunc(Number(points));
+    if (!p || Math.abs(p) > 1000) throw new BackendError('invalid', 'Choose an amount between -1000 and 1000 (not 0).');
+    if (String(reason || '').trim().length < 5) throw new BackendError('invalid', 'Give a reason (at least 5 characters).');
+    const u = this.db.users.find((x) => x.alias.toLowerCase() === String(alias || '').trim().toLowerCase());
+    if (!u) throw new BackendError('missing', 'No user with that alias.');
+    const n = p < 0 ? Math.max(p, -u.points) : p;
+    if (!n) throw new BackendError('invalid', 'That user has no points to remove.');
+    this.db.points.push({ id: 'pe-' + uid(), userId: u.id, rule: 'manual_adjustment', points: n, refType: 'manual', refId: uid(), at: iso(), status: 'awarded', pointsRequested: p, reason: String(reason).trim().slice(0, 300), actor: this.currentUser().id, policyVersion: POLICY_VERSION });
+    u.points += n;
+    u.levelFloor = Math.max(u.levelFloor || 1, levelInfo(u.points).level.n);
+    this._logAdmin('grant_points', u.id, 'points:' + n, reason); this.save(); this.emit?.();
+    return { alias: u.alias, points: n, total: u.points };
   },
   async adminReverseAward(entryId, reason) {
     this.requireAdmin(); this._ensurePoints();
