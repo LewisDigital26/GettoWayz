@@ -80,7 +80,7 @@ No public routing engine has a scooter profile. Scooter mode uses the cycling ne
 Everything — accounts, alerts, paths, points, friends, live sharing, trip rewards — runs on one free Supabase project.
 
 1. **Create a project** at supabase.com (Ireland / eu-west-1 is fine for the UK).
-2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`. New projects run schema.sql, then 002, 003 and 004.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
+2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`, then `supabase/migration-005-manual-points.sql`. New projects run schema.sql, then 002, 003, 004 and 005.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
 3. **Keys**: *Project Settings → API*. Copy the Project URL and the **anon / publishable** key (never the `service_role` key).
 4. **Config**: copy `config.example.js` → `config.local.js`:
    ```js
@@ -195,7 +195,9 @@ How the distance is worked out and protected:
 - **Points lookup by alias:** reverse a single award with a reason, or remove a contribution and reverse all of its awards.
 - **Audit log.** Every review and reversal is written to `admin_actions`.
 
-**Setup:** run `supabase/migration-004-points.sql` once after 002 and 003. No new environment variables or services.
+**Setup:** run `supabase/migration-004-points.sql` once after 002 and 003, then `supabase/migration-005-manual-points.sql`. No new environment variables or services.
+
+**Moderator points adjustments (testing):** Profile › App › *Add test points* (moderators only) opens the moderation screen at *Add or remove points*. Enter an alias, an amount (up to ±1000) and a reason. Each adjustment is a normal ledger entry (*Points adjusted by a moderator*) that the user sees in Activity with the reason, is logged in `admin_actions`, and can be reversed from *Points lookup & reversals*. Removals never take a balance below 0; levels already reached are kept. Moderator accounts never appear on leaderboards.
 
 ## App layout & navigation
 
