@@ -101,7 +101,7 @@ export async function renderActivityPage(ctx, page) {
   for (const e of ledger.entries) {
     const showInAll = !coveredRules.has(e.rule) || e.status === 'reversed' || e.status === 'reversal' || e.status === 'capped';
     items.push({ kind: 'points', alsoAll: showInAll, at: new Date(e.at), node: (at) => feedItem({
-      ico: e.rule === 'reversal' ? '↩️' : e.rule.startsWith('trip') ? '🧭' : e.rule === 'path_approved' ? '🗺️' : '⭐',
+      ico: e.rule === 'reversal' ? '↩️' : e.rule === 'manual_adjustment' ? '🛠️' : e.rule.startsWith('trip') ? '🧭' : e.rule === 'path_approved' ? '🗺️' : '⭐',
       title: ruleLabel(e.rule, pol.rules), sub: e.reason || null,
       chips: [e.status !== 'awarded' ? chip(ENTRY_STATUS[e.status] || ENTRY_STATUS.awarded) : null],
       right: el('span', { class: e.points < 0 ? 'pts-minus' : 'pts-plus' }, e.points > 0 ? `+${e.points}` : String(e.points)), at }) });
