@@ -1,7 +1,7 @@
 // Friends, live-location sharing and trip sharing screens.
 import { $, el, esc, fmtAgo, fmtDistance, fmtDuration, haversine, MODES } from '../util.js';
 import { state, set, selectedRoute } from '../state.js';
-import { SHARE_DURATIONS, SHARED_TRIP_BONUS, SHARE_STALE_SECONDS, SHARE_LOST_SECONDS, FRIEND_LIMITS, POINTS, TRIP_LIMITS, sharedTripBonusFor } from '../backend/rules.js';
+import { SHARE_DURATIONS, SHARE_STALE_SECONDS, SHARE_LOST_SECONDS, FRIEND_LIMITS } from '../backend/rules.js';
 import { openModal, closeModal, isModalOpen } from './modal.js';
 import { toast } from './sheet.js';
 import { requireSignIn } from './account.js';
@@ -207,18 +207,14 @@ export async function openShareTrip(ctx, onDone, opts = {}) {
   const list = el('div', { class: 'list pick-list' });
   const share = el('button', { class: 'btn primary block', disabled: !friendId }, 'Send invitation');
   const renderList = () => list.replaceChildren(...social.friends.map((f) => el('label', { class: `item pick ${f.id === friendId ? 'on' : ''}` },
-    el('input', { type: 'radio', name: 'shareFriend', checked: f.id === friendId, onchange: () => { friendId = f.id; share.disabled = false; renderList(); optLabel(); } }),
+    el('input', { type: 'radio', name: 'shareFriend', checked: f.id === friendId, onchange: () => { friendId = f.id; share.disabled = false; renderList(); } }),
     el('div', { class: 'body' }, el('div', { class: 't' }, esc(f.alias), f.sample ? el('span', { class: 'chip sample', style: 'margin-left:6px' }, 'Sample') : ''), el('div', { class: 's' }, f.gwId)))));
   renderList();
   const live = el('input', { type: 'checkbox', checked: !!opts.live });
-  const optIn = el('input', { type: 'checkbox' });
-  const optText = el('span', { class: 'small' });
-  const optLabel = () => { const f = social.friends.find((x) => x.id === friendId); optText.replaceChildren(el('strong', {}, 'Opt into shared-trip rewards'), ` — only counts if ${f ? esc(f.alias) : 'your friend'} accepts and opts in too, your live progress is on, and you check in at the destination (this trip: up to +${sharedTripBonusFor(r.distanceM)} each). Sharing itself never earns points.`); };
-  optLabel();
   share.onclick = async () => {
     share.disabled = true; share.textContent = 'Sending…';
     try {
-      const s = await ctx.backend.startTripShare(friendId, { destName: dest.name, mode: state.mode, geometry: r.geometry, durationS: r.durationS, rewardOptIn: optIn.checked, live: live.checked, toFriendLocation: dest.friendId === friendId });
+      const s = await ctx.backend.startTripShare(friendId, { destName: dest.name, mode: state.mode, geometry: r.geometry, durationS: r.durationS, live: live.checked, toFriendLocation: dest.friendId === friendId });
       result = s; closeModal(); // onClose → done(result), after the modal is gone (so a follow-up modal isn't closed)
       toast(`Invitation sent to ${esc(s.to.alias)}. They'll see your route once they accept.`, 'success');
       if (live.checked && !state.position) ctx.locate({ follow: true });
@@ -233,7 +229,7 @@ export async function openShareTrip(ctx, onDone, opts = {}) {
       el('div', { class: 'consent-row' }, '✉️', el('div', {}, el('strong', {}, 'They get an invitation first'), el('div', { class: 'small muted' }, 'They see where you are heading, your travel mode, distance and time. Your route line and position are only shown if they accept.'))),
       el('div', { class: 'consent-row' }, '🏁', el('div', {}, el('strong', {}, 'Ends when you arrive or stop'), el('div', { class: 'small muted' }, `It also expires after ${Math.min(240, Math.ceil(r.durationS / 30) + 15)} min. When it ends your route and position are deleted.`))),
       el('div', { class: 'consent-row' }, '↔️', el('div', {}, el('strong', {}, 'One direction only'), el('div', { class: 'small muted' }, 'They do not share their location back unless they choose to.')))),
-    el('label', { class: 'row', style: 'gap:10px;margin:12px 0;align-items:flex-start' }, optIn, optText),
+    el('p', { class: 'small muted', style: 'margin:10px 0' }, 'Sharing never earns points, so there is no reason to share more than you want to.'),
     share,
     el('button', { class: 'btn block ghost', style: 'margin-top:8px', onclick: () => closeModal() }, opts.navigating ? 'Navigate without sharing' : 'Cancel'),
   ], { onClose: () => done(result) });
@@ -331,7 +327,6 @@ export function openShareViewer(ctx, share) {
   const title = share.type === 'trip' ? `${esc(share.from.alias)}'s trip` : `${esc(share.from.alias)}'s location`;
   if (share.status === 'ended') {
     body.push(el('div', { class: 'empty' }, el('div', { class: 'big' }, share.endedReason === 'arrived' ? '🏁' : '⏹️'), el('strong', {}, share.endedReason === 'arrived' ? `${esc(share.from.alias)} arrived` : 'Sharing ended'), el('div', { class: 'muted small' }, endedLabel(share.endedReason, 'incoming'), share.endedAt ? ` · ${fmtAgo(share.endedAt)}` : '')));
-    if (share.trip?.bonusPoints) body.push(el('div', { class: 'notice info' }, `Shared-trip bonus: +${share.trip.bonusPoints} points for both of you.`));
     return openModal(title, body);
   }
   if (share.type === 'trip' && share.status === 'invited') {
@@ -382,11 +377,6 @@ export function openShareViewer(ctx, share) {
         el('div', { class: 'notice', style: 'margin-top:8px' }, share.live ? 'Live progress is on, but no position has arrived yet.' : `${esc(share.from.alias)} hasn't turned on live progress, so you can see the planned route only.`));
     }
     body.push(card);
-    const both = t.rewardOptIn?.[share.from.id] && t.rewardOptIn?.[share.to.id];
-    const mineOpt = t.rewardOptIn?.[state.user?.id];
-    body.push(el('div', { class: 'notice' }, both ? `Shared-trip rewards: both opted in. Up to +${sharedTripBonusFor(t.routeDistanceM)} each if they check in at the destination after travelling it with live progress on.`
-      : mineOpt ? 'You opted into shared-trip rewards; waiting for them.' : `${esc(share.from.alias)} ${t.rewardOptIn?.[share.from.id] ? 'opted into' : 'has not opted into'} shared-trip rewards.`),
-      !mineOpt ? el('button', { class: 'btn sm', style: 'margin-top:6px', onclick: async () => { try { await ctx.backend.optInTripReward(share.id); toast('Opted in — this does not share your location', 'success'); } catch (e) { toast(e.message, 'error'); } closeModal(); } }, 'Opt in to rewards (no location sharing)') : null);
   }
   body.push(el('div', { class: 'row wrap', style: 'margin-top:10px' },
     share.lastPos ? el('button', { class: 'btn primary', onclick: () => { closeModal(); ctx.map.flyTo([share.lastPos.lat, share.lastPos.lng], 16); } }, 'Show on map')
@@ -415,30 +405,5 @@ function sharingTab(ctx, shares) {
     el('p', { class: 'muted small' }, 'Everything you are sharing and everything shared with you. Sharing is always with one friend, time-limited and one-directional.'),
     active.length ? el('div', { class: 'list' }, ...active.map(row)) : el('div', { class: 'empty' }, 'Nothing is being shared right now.'),
     ended.length ? el('div', {}, el('h3', { style: 'font-size:14px;margin:12px 0 6px' }, 'Recently ended'), el('div', { class: 'list' }, ...ended.slice(0, 5).map(row))) : null,
-    el('div', { class: 'notice', style: 'margin-top:12px' }, 'How the shared-trip bonus works: ', SHARED_TRIP_BONUS.bands.map((b) => `${fmtDistance(b.minM)}+ → +${b.points}`).join(' · '), `. Max +${SHARED_TRIP_BONUS.maxPerTrip} per trip, +${SHARED_TRIP_BONUS.dailyCap} per day. Only progress recorded live along the chosen route counts, after your friend accepted. Sharing alone never earns points.`));
-}
-
-// ============================================================
-// Arrival check-in
-// ============================================================
-export function openCheckIn(ctx, { shareId, route, dest }, onDoneRaw) {
-  const onDone = once(onDoneRaw);
-  const near = state.position ? haversine([state.position.lat, state.position.lng], [dest.lat, dest.lng]) : null;
-  const btn = el('button', { class: 'btn primary block', onclick: async () => {
-    btn.disabled = true;
-    try {
-      const res = await ctx.backend.tripCheckIn({ shareId, routeDistanceM: route.distanceM, destLat: dest.lat, destLng: dest.lng, position: state.position });
-      onDone(res); closeModal();
-      const total = res.basePoints + res.bonusPoints;
-      if (total > 0) toast(`Checked in: +${res.basePoints} trip${res.bonusPoints ? ` · +${res.bonusPoints} shared-trip bonus (${fmtDistance(res.eligibleM)})` : ''}`, 'success');
-      else toast(res.reasons[0] || 'Checked in', res.reasons.length ? 'error' : 'success');
-      if (total > 0 && res.reasons.length) toast(res.reasons[0]);
-    } catch (e) { toast(e.message, 'error'); btn.disabled = false; }
-  } }, 'Check in — I have arrived');
-  openModal('Arrived?', [
-    el('p', {}, `Check in at ${esc(dest.name)} to earn +${POINTS.trip_completed} points${shareId ? ', plus any shared-trip bonus' : ''}. Optional — you can skip it.`),
-    near != null && near > TRIP_LIMITS.arrivalRadiusM ? el('div', { class: 'notice warn' }, `You appear to be ${fmtDistance(near)} from the destination. Check-in only awards points within ${TRIP_LIMITS.arrivalRadiusM} m.`) : null,
-    btn,
-    el('button', { class: 'btn block ghost', style: 'margin-top:8px', onclick: () => { closeModal(); onDone?.(null); } }, 'Skip'),
-  ], { onClose: () => onDone?.(null) });
+    el('div', { class: 'notice', style: 'margin-top:12px' }, 'Sharing a trip or your location never earns points. Trip points come from verified trips, whether you share them or not.'));
 }
