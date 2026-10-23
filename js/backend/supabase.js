@@ -150,7 +150,6 @@ export class SupabaseBackend {
     const r = await this.rpc('admin_user_points', { p_alias: alias });
     return r ? { ...r, entries: (r.entries || []).map((e) => ({ ...e, status: e.status || 'awarded' })) } : null;
   }
-  async adminGrantPoints(alias, points, reason) { const r = await this.rpc('admin_grant_points', { p_alias: alias, p_points: Math.trunc(Number(points)) || 0, p_reason: reason }); this.emit(); return r; }
   async adminReverseAward(entryId, reason) { const n = await this.rpc('admin_reverse_award', { p_entry: entryId, p_reason: reason }); this.emit(); return n; }
   async adminReverseSource(refType, refId, reason) { const n = await this.rpc('admin_reverse_source', { p_ref_type: refType, p_ref_id: refId, p_reason: reason }); this.emit(); return n; }
   async adminTripsForReview() { return (await this.rpc('admin_trips_for_review', {})) || []; }
@@ -250,7 +249,9 @@ export class SupabaseRealtime {
     this.isCrossDevice = true;
     this.note = 'Live sharing works between phones while the app is open on both.';
     this.cbs = new Set();
+    this.alertCbs = new Set();
     const fire = () => this.cbs.forEach((cb) => cb());
+    const fireAlerts = () => this.alertCbs.forEach((cb) => cb());
     backend.onChange(fire);
     this.subscribe = () => {
       this.channel?.unsubscribe();
@@ -258,10 +259,18 @@ export class SupabaseRealtime {
         .on('postgres_changes', { event: '*', schema: 'public', table: 'shares' }, fire)
         .on('postgres_changes', { event: '*', schema: 'public', table: 'friends' }, fire)
         .subscribe();
+      // Community alerts: every phone with the app open sees a new report (or confirmation / review) within a second or two.
+      // Needs the tables added to the realtime publication — see supabase/migration-006-realtime-alerts.sql
+      this.alertChannel?.unsubscribe();
+      this.alertChannel = backend.sb.channel('gw-alerts')
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'alerts' }, fireAlerts)
+        .on('postgres_changes', { event: '*', schema: 'public', table: 'alert_confirmations' }, fireAlerts)
+        .subscribe();
     };
     backend.sb.auth.onAuthStateChange(() => this.subscribe());
     this.subscribe();
     setInterval(fire, 10000); // staleness / expiry ticks
   }
   onUpdate(cb) { this.cbs.add(cb); return () => this.cbs.delete(cb); }
+  onAlerts(cb) { this.alertCbs.add(cb); return () => this.alertCbs.delete(cb); }
 }
