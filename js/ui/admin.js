@@ -1,7 +1,7 @@
 // Moderation screen — review path suggestions and alerts. Admin role only (enforced by the backend too).
 import { el, esc, fmtAgo, fmtDistance, lineLength } from '../util.js';
 import { state } from '../state.js';
-import { ALERT_CATEGORIES, PATH_TYPES, SURFACES } from '../backend/rules.js';
+import { ALERT_CATEGORIES, PATH_TYPES, SURFACES, POINT_RULE_MAP } from '../backend/rules.js';
 import { openModal, closeModal } from './modal.js';
 import { toast } from './sheet.js';
 
@@ -38,11 +38,53 @@ export async function openAdmin(ctx) {
         el('button', { class: 'btn sm danger', onclick: () => act('reject') }, 'Reject')));
   };
 
+  const trips = await ctx.backend.adminTripsForReview?.().catch(() => []) || [];
+  const tripCard = (t) => {
+    const reason = el('input', { placeholder: 'Reason (required to reject)', maxlength: '200' });
+    const act = async (d) => {
+      if (d === 'reject' && reason.value.trim().length < 3) return toast('Add a short reason', 'error');
+      try { const n = await ctx.backend.adminReviewTrip(t.id, d, reason.value); toast(d === 'approve' ? `Approved — +${n} points` : 'Trip rejected', 'success'); openAdmin(ctx); } catch (e) { toast(e.message, 'error'); }
+    };
+    return el('div', { class: 'card' },
+      el('div', { class: 'row between' }, el('strong', {}, `${esc(t.alias)} · ${t.mode}`), el('span', { class: 'chip pending' }, (t.flags || []).includes('speed') ? 'Fast segment' : 'Fast overall')),
+      el('div', { class: 'small muted', style: 'margin:4px 0' }, `${t.day} · ~${fmtDistance(t.eligibleM || 0)} of ${fmtDistance(t.routeM || 0)} route · ${t.minutes} min · ${t.checkpoints} checks · would award +${(t.basePoints || 0) + (t.distancePoints || 0)}`),
+      el('div', { class: 'field' }, reason),
+      el('div', { class: 'row wrap' }, el('button', { class: 'btn sm primary', onclick: () => act('approve') }, 'Approve points'), el('button', { class: 'btn sm danger', onclick: () => act('reject') }, 'Reject')));
+  };
+  const lookupInput = el('input', { placeholder: 'Alias', maxlength: '20', autocapitalize: 'off' });
+  const lookupOut = el('div');
+  const lookup = async () => {
+    lookupOut.replaceChildren(el('div', { class: 'loading-row' }, el('span', { class: 'spinner' }), 'Looking up…'));
+    try {
+      const u = await ctx.backend.adminUserPoints(lookupInput.value);
+      if (!u) return lookupOut.replaceChildren(el('div', { class: 'notice' }, 'No user with that alias.'));
+      lookupOut.replaceChildren(el('div', { class: 'small muted', style: 'margin:6px 0' }, `${esc(u.alias)} · ${u.points} pts · level floor ${u.levelFloor}`),
+        u.entries.length ? el('div', { class: 'list' }, ...u.entries.map((e) => {
+          const reason = el('input', { placeholder: 'Reason for reversal (required)', maxlength: '300' });
+          const canReverse = ['awarded', 'capped'].includes(e.status) && e.rule !== 'reversal';
+          return el('div', { class: 'card' },
+            el('div', { class: 'row between' }, el('strong', {}, POINT_RULE_MAP[e.rule]?.label || e.rule), el('strong', {}, `${e.points > 0 ? '+' : ''}${e.points}`)),
+            el('div', { class: 'small muted' }, `${new Date(e.at).toLocaleString('en-GB')} · ${e.status}${e.refType ? ` · ${e.refType}:${String(e.refId).slice(0, 8)}` : ''}${e.reason ? ` · “${esc(e.reason)}”` : ''}`),
+            canReverse ? el('div', {}, el('div', { class: 'field', style: 'margin-top:6px' }, reason),
+              el('div', { class: 'row wrap' },
+                el('button', { class: 'btn sm danger', onclick: async () => { try { await ctx.backend.adminReverseAward(e.id, reason.value); toast('Award reversed and logged', 'success'); lookup(); } catch (err) { toast(err.message, 'error'); } } }, 'Reverse this award'),
+                ['path', 'alert'].includes(e.refType) ? el('button', { class: 'btn sm ghost', onclick: async () => { try { const n = await ctx.backend.adminReverseSource(e.refType, e.refId, reason.value); toast(`Contribution removed; ${n} pts reversed across all awards`, 'success'); lookup(); } catch (err) { toast(err.message, 'error'); } } }, `Remove ${e.refType} + reverse all its awards`) : null)) : null);
+        })) : el('div', { class: 'empty' }, 'No points yet.'));
+    } catch (e) { lookupOut.replaceChildren(el('div', { class: 'notice danger' }, esc(e.message))); }
+  };
+
   openModal('Moderation queue', [
-    el('p', { class: 'muted small' }, 'Approve only paths that are clearly public and legal to use. Approval adds the path to the community map and awards points to the contributor. Verifying an alert awards points to the reporter and anyone who confirmed it.'),
+    el('p', { class: 'muted small' }, 'Approve only paths that are clearly public and legal to use. Approval adds the path to the community map and awards points to the contributor. Verifying an alert awards points to the reporter and anyone who confirmed it. Every action is logged.'),
     el('h3', { style: 'font-size:15px;margin:10px 0 6px' }, `Path suggestions (${pendingPaths.length})`),
     pendingPaths.length ? el('div', { class: 'list' }, ...pendingPaths.map(pathCard)) : el('div', { class: 'empty' }, 'Queue is empty.'),
     el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, `Alerts awaiting review (${pendingAlerts.length})`),
     pendingAlerts.length ? el('div', { class: 'list' }, ...pendingAlerts.map(alertCard)) : el('div', { class: 'empty' }, 'Nothing to review.'),
+    el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, `Trips held for review (${trips.length})`),
+    el('p', { class: 'muted small' }, 'Trips that looked too fast for their travel mode. No locations are stored — only the summary below. Approve only if it looks plausible.'),
+    trips.length ? el('div', { class: 'list' }, ...trips.map(tripCard)) : el('div', { class: 'empty' }, 'No trips to check.'),
+    el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, 'Points lookup & reversals'),
+    el('p', { class: 'muted small' }, 'Reverse an award that turned out to be fraudulent or mistaken. The original entry is kept and marked reversed; the user sees the reversal and your reason. Users keep their highest level.'),
+    el('div', { class: 'row' }, lookupInput, el('button', { class: 'btn', onclick: lookup }, 'Find')),
+    lookupOut,
   ]);
 }
