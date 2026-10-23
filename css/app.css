@@ -516,7 +516,7 @@ html.bar-hidden .tabbar { display: none; }
 }
 .page-head h1 { font-size: 26px; font-weight: 800; letter-spacing: -.02em; }
 .page-head h1:focus { outline: none; }
-.page-head h1:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; border-radius: 6px; }
+.page-head h1:focus-visible { outline: none; } /* focused only so screen readers announce the new page */
 .page-actions { display: flex; gap: 6px; align-items: center; }
 .page-actions .iconbtn { box-shadow: none; width: 40px; height: 40px; }
 .sec { margin-top: 20px; }
