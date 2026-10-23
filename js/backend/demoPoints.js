@@ -183,7 +183,7 @@ export const pointsMethods = {
     const me = this.currentUser();
     if (scope === 'friends' && !me) return [];
     const ws = weekStart();
-    const pool = this.db.users.filter((u) => u.role !== 'admin' && (
+    const pool = this.db.users.filter((u) => (
       (scope === 'public' && u.leaderboardOptIn) ||
       (scope === 'friends' && (u.id === me.id || (u.friendsBoardOptIn && this._friendship?.(me.id, u.id) && !this._blockedEither?.(me.id, u.id))))));
     const scored = pool.map((u) => ({ u, score: period === 'week'
