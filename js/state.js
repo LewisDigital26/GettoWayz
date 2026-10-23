@@ -16,7 +16,7 @@ export const state = {
   locationStatus: 'idle',       // idle | asking | ok | denied | unavailable
   alerts: [],
   paths: [],
-  layers: { alerts: true, paths: true, pending: false },
+  layers: { alerts: true, paths: true, pending: false, traffic: false },
   draw: null,                   // { points: [[lat,lng]] } while suggesting a path
   online: navigator.onLine,
 };

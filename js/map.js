@@ -3,12 +3,19 @@
 import { config } from './config.js';
 import { MODES, esc, fmtAgo, cssVar } from './util.js';
 import { ALERT_CATEGORIES } from './backend/rules.js';
+import { VectorBasemap, vectorAvailable } from './basemap.js';
 
 export class GwMap {
   constructor(el, { onAlertClick, onPathClick, onMapTap, onDrawPoint } = {}) {
     this.map = L.map(el, { zoomControl: false, attributionControl: true, tap: true, maxZoom: 19 })
       .setView(config.DEFAULT_CENTER, config.DEFAULT_ZOOM);
-    this.tiles = L.tileLayer(this.tileUrl(), { attribution: config.TILE_ATTRIBUTION, maxZoom: 19 }).addTo(this.map);
+    this.basemap = null; this.tiles = null;
+    if (config.BASEMAP === 'vector' && vectorAvailable()) {
+      this.basemap = new VectorBasemap(this.map);
+      this.map.attributionControl.addAttribution(config.VECTOR_ATTRIBUTION);
+    } else {
+      this.tiles = L.tileLayer(this.tileUrl(), { attribution: config.TILE_ATTRIBUTION, maxZoom: 19 }).addTo(this.map);
+    }
     this.map.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
 
     this.routeLayer = L.layerGroup().addTo(this.map);
@@ -19,6 +26,8 @@ export class GwMap {
     this.friendLayer = L.layerGroup().addTo(this.map);
     this.lampLayer = L.layerGroup();
     this.lightOverlay = L.layerGroup().addTo(this.map);
+    this.trafficTiles = null;                 // TomTom flow tiles (created on first show)
+    this.trafficLayer = L.layerGroup();       // incident pins + lines
     this.meMarker = null; this.destMarker = null; this.originMarker = null; this.accuracyCircle = null;
     this.drawing = false;
     this.cb = { onAlertClick, onPathClick, onMapTap, onDrawPoint };
@@ -29,9 +38,10 @@ export class GwMap {
     });
   }
 
-  /** Tile URL template (OSM by default). Dark colourways restyle tiles via the --map-filter CSS token. */
+  /** Raster fallback tile URL (OSM by default). Dark colourways restyle raster tiles via the --map-filter CSS token. */
   tileUrl() { return config.TILE_URL; }
-  refreshTiles() { this.tiles.setUrl(this.tileUrl()); }
+  /** Called when the colourway changes: recolours the vector basemap, or re-requests raster tiles. */
+  refreshTiles() { if (this.basemap) this.basemap.applyColourway(); else this.tiles?.setUrl(this.tileUrl()); }
   zoomIn() { this.map.zoomIn(); }
   zoomOut() { this.map.zoomOut(); }
   flyTo(latlng, zoom = 16) { this.map.flyTo(latlng, zoom, { duration: .6 }); }
@@ -102,6 +112,28 @@ export class GwMap {
   }
   togglePaths(show) { show ? this.pathLayer.addTo(this.map) : this.pathLayer.remove(); }
   toggleAlerts(show) { show ? this.alertLayer.addTo(this.map) : this.alertLayer.remove(); }
+  /** Live traffic: flow tiles under the pins, incidents on top. tileUrl comes from the traffic provider. */
+  toggleTraffic(show, tileUrl) {
+    if (show) {
+      if (!this.trafficTiles && tileUrl) this.trafficTiles = L.tileLayer(tileUrl, { maxZoom: 19, className: 'traffic-tiles', attribution: '&copy; <a href="https://www.tomtom.com">TomTom</a>' });
+      this.trafficTiles?.addTo(this.map);
+      this.trafficLayer.addTo(this.map);
+    } else { this.trafficTiles?.remove(); this.trafficLayer.remove(); }
+  }
+  bounds() { return this.map.getBounds(); }
+  zoom() { return this.map.getZoom(); }
+  renderTraffic(incidents, { categories, onClick } = {}) {
+    this.trafficLayer.clearLayers();
+    for (const t of incidents) {
+      const cat = categories?.[t.category] || { emoji: '⚠️', label: 'Incident' };
+      const closed = t.category === 8 || t.delayLevel === 4;
+      if (t.geometry.length > 1) L.polyline(t.geometry, { color: closed ? '#ff4d4f' : '#ffb020', weight: 5, opacity: .8, dashArray: closed ? '6 6' : null }).addTo(this.trafficLayer);
+      const m = L.marker([t.lat, t.lng], { icon: this.pin('traffic' + (closed ? ' closed' : ''), cat.emoji) });
+      m.bindPopup(`<div class="t">${esc(cat.label)}</div><div class="small muted">${esc(t.description || t.from || 'Live traffic report')}</div>`);
+      m.on('click', () => onClick?.(t));
+      m.addTo(this.trafficLayer);
+    }
+  }
 
   renderAlerts(alerts) {
     this.alertLayer.clearLayers();
@@ -169,5 +201,5 @@ export class GwMap {
   }
   endDraw() { this.drawing = false; this.drawLayer.clearLayers(); this.map.getContainer().style.cursor = ''; }
 
-  invalidate() { this.map.invalidateSize(); }
+  invalidate() { this.map.invalidateSize(); this.basemap?.invalidate(); }
 }

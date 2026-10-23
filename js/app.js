@@ -17,6 +17,8 @@ import { createRealtime } from './providers/realtime.js';
 import { openFriends, openShareTrip, askGoLive, openGoToFriend, shareForDestination, renderShareBanner, openShareViewer, freshness, renderFriendsPage } from './ui/friends.js';
 import { createStreetlightProvider } from './providers/streetlights.js';
 import { Streetlights, lightingBlock } from './ui/streetlights.js';
+import { createTraffic } from './providers/traffic.js';
+import { Traffic, trafficRow } from './ui/traffic.js';
 import { STREETLIGHTS } from './backend/rules.js';
 import { communityRoutes } from './providers/communityRouting.js';
 import { TRIP } from './backend/pointsPolicy.js';
@@ -30,9 +32,12 @@ export const ctx = {
   backend: createBackend(),
   routing: createRoutingProvider(),
   streetlights: createStreetlightProvider(),
+  traffic: createTraffic(),   // TomTom live traffic, null without a key
+  trafficUi: null,            // Traffic layer controller (set after map init)
   lights: null,               // Streetlights controller (set after map init)
   preferLit: false,           // user preference: rank routes by confirmed lighting (night only)
   rerenderRouteSheet: () => { if (state.destination && state.routes.length) renderRouteSheet(); },
+  refreshRouteSheet: () => { if (state.destination && state.routes.length && !state.navigating && !state.routing) { annotateRoutes(state.routes); renderRouteSheet(); } },
   geocoder: createGeocoder(),
   map: null,
   realtime: null,
@@ -83,8 +88,10 @@ ctx.backend.onChange(() => {
   if (was !== state.user?.id) { ctx.lastSocial = null; ctx.refreshPage?.(); } // signed in/out: redraw the open tab
 });
 ctx.lights = new Streetlights(ctx);
+ctx.trafficUi = new Traffic(ctx);
 ctx.realtime = await createRealtime(ctx.backend);
 ctx.realtime.onUpdate(refreshShares);
+ctx.realtime.onAlerts?.(() => refreshAlerts());
 initTabs(ctx);
 updateAvatar();
 refreshData();
@@ -144,23 +151,43 @@ function focusShare(id) {
 }
 
 // ---------- data ----------
+// Live community alerts: re-pull only the alerts (cheap) when realtime says one changed, and tell the user if it's new and nearby.
+let knownAlertIds = null, alertsBusy = false;
+async function refreshAlerts() {
+  if (alertsBusy) return; alertsBusy = true;
+  try {
+    const alerts = await ctx.backend.listAlerts();
+    if (ctx.backend.cacheAliases) await ctx.backend.cacheAliases(alerts.map((a) => a.createdBy));
+    const fresh = knownAlertIds ? alerts.filter((a) => !knownAlertIds.has(a.id) && a.createdBy !== state.user?.id) : [];
+    knownAlertIds = new Set(alerts.map((a) => a.id));
+    set({ alerts });
+    ctx.map.renderAlerts(alerts);
+    for (const a of fresh) {
+      const here = state.position || { lat: ctx.map.center()[0], lng: ctx.map.center()[1] };
+      if (haversine([a.lat, a.lng], [here.lat, here.lng]) < 1500) toast(`${ALERT_CATEGORIES[a.category]?.emoji || '⚠️'} New community alert nearby: ${ALERT_CATEGORIES[a.category]?.label || 'report'}`);
+    }
+    ctx.refreshRouteSheet();
+    if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome();
+  } catch { /* offline: keep what we have */ } finally { alertsBusy = false; }
+}
 async function refreshData() {
   const [alerts, paths] = await Promise.all([ctx.backend.listAlerts().catch(() => []), ctx.backend.listPaths().catch(() => [])]);
   if (ctx.backend.cacheAliases) await ctx.backend.cacheAliases([...alerts.map((a) => a.createdBy), ...paths.map((p) => p.createdBy)]);
+  knownAlertIds = new Set(alerts.map((a) => a.id));
   set({ alerts, paths });
   ctx.map.renderAlerts(alerts);
   ctx.map.renderPaths(paths, { showPending: state.layers.pending, myId: state.user?.id });
   if (ctx.lights?.visible()) ctx.lights.render();
   updateAvatar();
-  if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome({ keepState: true }); // background refresh: don't re-open a panel the user minimised
+  if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome();
   refreshShares();
 }
 
 // ---------- home sheet ----------
-function showHome({ keepState = false } = {}) {
+function showHome() {
   set({ destination: null, routes: [], selectedRouteId: null, routeError: null });
   ctx.map.clearRoutes(); ctx.map.setDestination(null); ctx.map.setOrigin(null);
-  hideSheet(false); if (!keepState) collapse(false);
+  hideSheet(false); collapse(false);
   const live = integrations.routing !== 'sample';
   const nearby = state.alerts.length;
   const quick = SAMPLE_PLACES.slice(0, 4);
@@ -415,6 +442,7 @@ function annotateRoutes(routes) {
     }
     r.communityPathIds = [...used];
     r.alertsNear = alertsNearRoute(state.alerts, r.geometry, 40);
+    r.trafficNear = ctx.trafficUi?.visible() ? ctx.trafficUi.nearRoute(r.geometry, 30) : [];
   }
   const withPaths = routes.filter((r) => r.source !== 'estimate' && r.communityPathIds.length > 0);
   const mostPaths = withPaths.length && routes.length > 1 ? withPaths.reduce((a, b) => (a.communityPathIds.length >= b.communityPathIds.length ? a : b)) : null;
@@ -478,13 +506,17 @@ function renderRouteSheet() {
       el('div', { class: 'label' }, rt.label, el('span', { class: `chip ${rt.source}` }, rt.source === 'live' ? 'Live' : rt.source === 'sample' ? 'Sample' : 'Estimate'),
         rt.communityPathIds.length ? el('span', { class: 'chip verified' }, `${rt.communityPathIds.length} community path${rt.communityPathIds.length > 1 ? 's' : ''}`) : null,
         rt.alertsNear.length ? el('span', { class: 'chip pending' }, `${rt.alertsNear.length} alert${rt.alertsNear.length > 1 ? 's' : ''}`) : null,
+        rt.trafficNear?.length ? el('span', { class: 'chip', style: 'color:#ffb020;border-color:#ffb020' }, `🚦 ${rt.trafficNear.length} traffic`) : null,
         rt.lighting?.covered ? el('span', { class: 'chip', style: 'color:#ffd34d;border-color:#ffd34d' }, `🔦 ${rt.lighting.pct.confirmed}% lit·confirmed`) : null,
-        state.mode === 'drive' && rt.source === 'live' ? el('span', { class: 'chip' }, 'No live traffic') : null),
+        state.mode === 'drive' && rt.source === 'live' && !ctx.trafficUi?.visible() ? el('span', { class: 'chip' }, 'No live traffic') : null),
       el('div', { class: 'basis' }, labelBasis(rt))),
     el('div', { class: 'stats' }, el('strong', {}, fmtDuration(rt.durationS)), el('span', {}, fmtDistance(rt.distanceM))))));
 
   const alertsBlock = r.alertsNear.length
     ? el('div', {}, el('h3', { style: 'font-size:14px;margin:8px 0 6px' }, 'Alerts along this route'), el('div', { class: 'list' }, ...r.alertsNear.map(alertRow)))
+    : null;
+  const trafficBlock = r.trafficNear?.length
+    ? el('div', {}, el('h3', { style: 'font-size:14px;margin:8px 0 6px' }, '🚦 Live traffic on this route'), el('div', { class: 'list' }, ...r.trafficNear.map((t) => trafficRow(t, ctx))))
     : null;
 
   const steps = el('ul', { class: 'steps' }, ...r.steps.map((s, i) => el('li', {}, el('span', { class: 'ic' }, i === r.steps.length - 1 ? '🏁' : s.community ? '🟢' : '→'), el('span', {}, s.text), el('span', { class: 'd' }, fmtDistance(s.dist)))));
@@ -500,6 +532,7 @@ function renderRouteSheet() {
       el('button', { class: 'btn primary block', onclick: startNavigation }, r.source === 'estimate' ? 'Start (estimate only)' : 'Start navigation'),
       el('button', { class: 'btn', onclick: () => { ctx.pickingOrigin = true; toast('Tap the map to choose a new start point'); } }, 'Start point')),
     alertsBlock,
+    trafficBlock,
     el('h3', { style: 'font-size:14px;margin:12px 0 4px' }, 'Directions'), steps,
     el('p', { class: 'small', style: 'color:var(--text-3)' }, 'Community paths are user suggestions approved by moderators for inclusion on the map. Alerts are community reports and may be out of date. Nothing here is a guarantee of safety or legality — follow signs and local rules.'),
   ]);
