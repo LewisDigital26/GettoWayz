@@ -69,7 +69,7 @@ No public routing engine has a scooter profile. Scooter mode uses the cycling ne
 Everything — accounts, alerts, paths, points, friends, live sharing, trip rewards — runs on one free Supabase project.
 
 1. **Create a project** at supabase.com (Ireland / eu-west-1 is fine for the UK).
-2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before streetlights were added: also run `supabase/migration-002-streetlights.sql`.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block.
+2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` and then `supabase/migration-003-route-sharing.sql`. New projects run schema.sql, then 002 and 003.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block.
 3. **Keys**: *Project Settings → API*. Copy the Project URL and the **anon / publishable** key (never the `service_role` key).
 4. **Config**: copy `config.example.js` → `config.local.js` and set `SUPABASE_URL`, `SUPABASE_ANON_KEY`, `BACKEND: "supabase"`.
 5. **Auth**: in *Authentication → Providers → Email*, turn **Confirm email** off while testing. Accounts are email + password; the email is never shown to other users.
