@@ -148,8 +148,8 @@ export class SupabaseBackend {
   shareView(s) {
     const me = this.profile?.id;
     const P = (id) => ({ id, alias: this.aliases?.[id] || 'member', gwId: this.gwIds?.[id] || '' });
-    const v = { id: s.id, type: s.type, status: s.status, startedAt: s.started_at, endsAt: s.ends_at, endedReason: s.ended_reason, endedAt: s.ended_at, from: P(s.from_user), to: P(s.to_user), direction: s.from_user === me ? 'outgoing' : 'incoming' };
-    if (s.trip) v.trip = { ...s.trip };
+    const v = { id: s.id, type: s.type, status: s.status, live: s.live !== false, startedAt: s.started_at, endsAt: s.ends_at, endedReason: s.ended_reason, endedAt: s.ended_at, respondedAt: s.responded_at, from: P(s.from_user), to: P(s.to_user), direction: s.from_user === me ? 'outgoing' : 'incoming' };
+    if (s.trip) { v.trip = { ...s.trip }; v.trip.mode ||= 'walk'; }
     if (s.last_lat != null) v.lastPos = { lat: s.last_lat, lng: s.last_lng, at: s.last_at };
     return v;
   }
@@ -159,15 +159,27 @@ export class SupabaseBackend {
     const { data, error } = await this.sb.from('shares').select('*').or(`status.neq.ended,ended_at.gt.${since}`).order('started_at', { ascending: false });
     if (error) throw wrap(error);
     await this.cacheAliases((data || []).flatMap((s) => [s.from_user, s.to_user]));
-    return (data || []).map((s) => this.shareView(s));
+    const views = (data || []).map((s) => this.shareView(s));
+    // Route lines: RLS only returns them to the owner, or to the recipient after accepting. Fetched once per share.
+    this.routeCache ||= new Map();
+    const need = views.filter((v) => v.type === 'trip' && v.status !== 'ended' && !v.trip?.geometry && !this.routeCache.has(v.id) && (v.direction === 'outgoing' || v.status === 'active')).map((v) => v.id);
+    if (need.length) {
+      const { data: rows } = await this.sb.from('share_routes').select('share_id, geometry').in('share_id', need);
+      for (const r of rows || []) this.routeCache.set(r.share_id, r.geometry);
+    }
+    for (const v of views) if (v.trip && v.status !== 'ended' && this.routeCache.has(v.id)) v.trip.geometry = this.routeCache.get(v.id);
+    return views;
   }
   async startLocationShare(friendId, minutes) { const s = await this.rpc('start_share', { p_to: friendId, p_minutes: minutes, p_type: 'location', p_trip: null }); this.emit(); return this.shareView(s); }
-  async startTripShare(friendId, { destName, destLat, destLng, geometry, routeDistanceM, durationS, rewardOptIn }) {
-    const me = this.requireUser();
-    const minutes = Math.min(240, Math.ceil((durationS / 60) * 2) + 15);
-    const trip = { destName, destLat, destLng, geometry, routeDistanceM, durationS, progressM: 0, arrived: false, rewardOptIn: rewardOptIn ? { [me.id]: true } : {} };
-    const s = await this.rpc('start_share', { p_to: friendId, p_minutes: minutes, p_type: 'trip', p_trip: trip }); this.emit(); return this.shareView(s);
+  async startTripShare(friendId, { destName, mode, geometry, durationS, rewardOptIn, live = false, toFriendLocation = false }) {
+    this.requireUser();
+    const g = geometry.map(([a, b]) => [+a.toFixed(6), +b.toFixed(6)]);
+    const s = await this.rpc('start_trip_share', { p_to: friendId, p_trip: { destName, mode, durationS, rewardOptIn: !!rewardOptIn, toFriendLocation: !!toFriendLocation }, p_geometry: g, p_live: !!live });
+    (this.routeCache ||= new Map()).set(s.id, g);
+    this.emit(); return this.shareView(s);
   }
+  async respondTripShare(id, accept) { await this.rpc('respond_trip_share', { p_share: id, p_accept: !!accept }); this.emit(); }
+  async setTripLive(id, live) { await this.rpc('set_trip_live', { p_share: id, p_live: !!live }); this.emit(); }
   async pauseShare(id) { await this.rpc('set_share_status', { p_share: id, p_status: 'paused', p_reason: null }); this.emit(); }
   async resumeShare(id) { await this.rpc('set_share_status', { p_share: id, p_status: 'active', p_reason: null }); this.emit(); }
   async stopShare(id, reason = 'stopped') { await this.rpc('set_share_status', { p_share: id, p_status: 'ended', p_reason: reason }); this.emit(); }
