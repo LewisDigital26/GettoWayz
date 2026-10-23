@@ -53,7 +53,6 @@ window.GW_CONFIG = {
   TILE_URL: "",           // optional custom tile template; TILE_ATTRIBUTION must match your provider's terms
   TILE_ATTRIBUTION: "",
   NOMINATIM_EMAIL: "",    // your contact email for Nominatim's usage policy
-  TOMTOM_API_KEY: "",     // developer.tomtom.com — enables the Live traffic layer (flow tiles + incidents)
   BACKEND: "local"        // swap to your adapter name once added in js/backend/index.js
 };
 ```
@@ -72,18 +71,6 @@ Drive uses the provider's car profile (`driving-car` on OpenRouteService, `drivi
 - **Routing at night**: each route is scored by sampling every 25 m and checking lamps within 30 m — *confirmed* / *reported out* / *unknown* / *no data*. The route card shows `🔦 N% lit·confirmed` and the sheet shows a bar with all four shares and a plain-language sentence (e.g. "66% has no lamp data at all"). On the map the selected route gets a thin warm overlay on confirmed stretches and red on reported-out ones. **Prefer routes with confirmed lighting** appears only at night and only when at least one route has ≥ 20% confirmed coverage; it ranks routes by that share and labels the best "Most confirmed lighting". Nothing is ever described as safe.
 - **Privacy**: lamps are fetched for the map view, not the user's position; no route or location history is stored.
 
-### Live traffic (cheapest setup)
-
-Two sources, both free at test-app scale:
-
-1. **TomTom Traffic API** — car traffic. Sign up at developer.tomtom.com, create a key, paste it into `config.local.js` as `TOMTOM_API_KEY`. The free tier covers roughly 2,500 incident requests and 50,000 tiles a day. The app keeps well inside that: incidents are fetched once per map view, cached 60 s, and only at zoom ≥ 11.
-   - **Layer control**: map layers (⧉) → *🚦 Live traffic*. Roads are tinted by current speed vs. free-flow (green / amber / red) and incidents — crashes, closures, roadworks, floods, broken-down vehicles — appear as pins with a dashed line along closures. Tap for the delay, road, and expected clearance time. Preference is stored on the device.
-   - **Routing**: every route card shows `🚦 N traffic` when live incidents sit within 30 m of it, and the route sheet lists them under *Live traffic on this route*. The *No live traffic* chip on Drive routes disappears while the layer is on.
-   - Drivers are the source, so it covers roads, not footpaths. The copy says so.
-2. **Supabase Realtime** — community alerts. Run `supabase/migration-006-realtime-alerts.sql` once; after that every phone with the app open sees a new report, confirmation or moderator review within a second or two, with a toast when a new alert lands within 1.5 km of the user. No extra cost: Realtime is included in the free project.
-
-Before a public launch, move the TomTom incidents call behind a Supabase Edge Function so the key is not shipped in `config.local.js`.
-
 ### Scooter mode
 
 No public routing engine has a scooter profile. Scooter mode uses the cycling network with scooter speed estimates and says so in the route basis. Check local rules on where e-scooters may be ridden.
@@ -93,7 +80,7 @@ No public routing engine has a scooter profile. Scooter mode uses the cycling ne
 Everything — accounts, alerts, paths, points, friends, live sharing, trip rewards — runs on one free Supabase project.
 
 1. **Create a project** at supabase.com (Ireland / eu-west-1 is fine for the UK).
-2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`. New projects run schema.sql, then 002, 003 and 004.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
+2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`, then `supabase/migration-005-manual-points.sql`, then `supabase/migration-006-mods-on-leaderboard.sql`. New projects run schema.sql, then 002 to 006 in order.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
 3. **Keys**: *Project Settings → API*. Copy the Project URL and the **anon / publishable** key (never the `service_role` key).
 4. **Config**: copy `config.example.js` → `config.local.js`:
    ```js
@@ -197,7 +184,7 @@ How the distance is worked out and protected:
 - **Weekly:** Monday 00:00 to Sunday 23:59 UK time. Only `awarded` points count; reversed, capped and pending don't.
 - **All-time:** the current balance.
 - **Friends:** you plus accepted friends who turned on the friends board (weekly or all-time).
-- **Opt-in.** Public and friends visibility are separate opt-ins, both off by default. Moderators are excluded.
+- **Opt-in.** Public and friends visibility are separate opt-ins, both off by default. Moderators follow the same rules.
 - **What's shown.** Rows show rank, alias, level and points only: no locations, routes, distances or times.
 - **Ties** share a rank (1, 2, 2, 4) and are listed alphabetically.
 - **Paging.** Max 50 rows per page and offset ≤ 500.
@@ -208,7 +195,9 @@ How the distance is worked out and protected:
 - **Points lookup by alias:** reverse a single award with a reason, or remove a contribution and reverse all of its awards.
 - **Audit log.** Every review and reversal is written to `admin_actions`.
 
-**Setup:** run `supabase/migration-004-points.sql` once after 002 and 003. No new environment variables or services.
+**Setup:** run `supabase/migration-004-points.sql` once after 002 and 003, then 005 and 006. No new environment variables or services.
+
+**Moderator points adjustments (testing):** Profile › App › *Add test points* (moderators only) opens the moderation screen at *Add or remove points*. Enter an alias, an amount (up to ±1000) and a reason. Each adjustment is a normal ledger entry (*Points adjusted by a moderator*) that the user sees in Activity with the reason, is logged in `admin_actions`, and can be reversed from *Points lookup & reversals*. Removals never take a balance below 0; levels already reached are kept. Moderators appear on leaderboards like anyone else once they opt in (`supabase/migration-006-mods-on-leaderboard.sql`).
 
 ## App layout & navigation
 
