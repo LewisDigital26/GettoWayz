@@ -12,15 +12,18 @@ import { renderSheet, collapse, hideSheet, toast, statusStrip } from './ui/sheet
 import { openModal, closeModal } from './ui/modal.js';
 import { openReportFlow, openAlertDetail, alertsNearRoute } from './ui/alerts.js';
 import { startSuggestPath, openPathDetail } from './ui/paths.js';
-import { openAccount, requireSignIn, updateAvatar, openAppearance } from './ui/account.js';
+import { openAccount, requireSignIn, updateAvatar, openAppearance, renderProfilePage } from './ui/account.js';
 import { createRealtime } from './providers/realtime.js';
-import { openFriends, openShareTrip, askGoLive, openGoToFriend, shareForDestination, renderShareBanner, openShareViewer, freshness } from './ui/friends.js';
+import { openFriends, openShareTrip, askGoLive, openGoToFriend, shareForDestination, renderShareBanner, openShareViewer, freshness, renderFriendsPage } from './ui/friends.js';
 import { createStreetlightProvider } from './providers/streetlights.js';
 import { Streetlights, lightingBlock } from './ui/streetlights.js';
 import { STREETLIGHTS } from './backend/rules.js';
 import { communityRoutes } from './providers/communityRouting.js';
 import { TRIP } from './backend/pointsPolicy.js';
-import { showTripResult } from './ui/points.js';
+import { showTripResult, renderLeaderboardPage } from './ui/points.js';
+import { renderActivityPage, attentionCount } from './ui/activity.js';
+import { initTabs, registerPage, setBadge, updateProfileTab } from './ui/tabs.js';
+import { prefs, applyPrefs } from './prefs.js';
 
 // ---------- services ----------
 export const ctx = {
@@ -48,7 +51,15 @@ export const ctx = {
   setDestination,
   showHome,
   openFriends: (tab) => openFriends(ctx, tab),
+  refreshShares: () => refreshShares(),
+  refreshBadges: (force) => refreshBadges(force),
+  setAttention: (n) => setAttention(n),
 };
+applyPrefs();
+registerPage('leaderboard', 'Leaderboard', renderLeaderboardPage);
+registerPage('friends', 'Friends', renderFriendsPage);
+registerPage('activity', 'Activity', renderActivityPage);
+registerPage('profile', 'Profile', renderProfilePage);
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
@@ -64,10 +75,17 @@ ctx.map = new GwMap($('#map'), {
 
 await Promise.race([ctx.backend.ready || Promise.resolve(), new Promise((r) => setTimeout(r, 6000))]); // never block the UI on auth
 set({ user: ctx.backend.currentUser() });
-ctx.backend.onChange(() => { set({ user: ctx.backend.currentUser() }); refreshData(); });
+ctx.backend.onChange(() => {
+  const was = state.user?.id;
+  set({ user: ctx.backend.currentUser() });
+  updateProfileTab();
+  refreshData();
+  if (was !== state.user?.id) { ctx.lastSocial = null; ctx.refreshPage?.(); } // signed in/out: redraw the open tab
+});
 ctx.lights = new Streetlights(ctx);
 ctx.realtime = await createRealtime(ctx.backend);
 ctx.realtime.onUpdate(refreshShares);
+initTabs(ctx);
 updateAvatar();
 refreshData();
 showHome();
@@ -79,7 +97,7 @@ subscribe((_, patch) => { if ('online' in patch) toast(state.online ? 'Back onli
 // ---------- sharing data ----------
 let lastShareIds = '';
 async function refreshShares() {
-  if (!state.user) { ctx.shares = []; ctx.map.renderFriends([]); renderShareBanner(ctx, []); return; }
+  if (!state.user) { ctx.shares = []; ctx.map.renderFriends([]); renderShareBanner(ctx, []); refreshBadges(); return; }
   const shares = await ctx.backend.listShares();
   ctx.shares = shares;
   ctx.map.renderFriends(shares, { freshness, onClick: (s) => openShareViewer(ctx, s) });
@@ -87,10 +105,11 @@ async function refreshShares() {
   // notify about new incoming shares
   const incoming = shares.filter((s) => s.direction === 'incoming' && s.status !== 'ended');
   const ids = incoming.map((s) => s.id).join(',');
-  if (ids && ids !== lastShareIds) {
+  if (ids && ids !== lastShareIds && prefs().notifyShares) {
     for (const s of incoming) if (!lastShareIds.includes(s.id)) toast(s.type === 'trip' && s.status === 'invited' ? `${s.from.alias} wants to share a trip with you — tap View to accept or decline` : `${s.from.alias} is sharing their ${s.type === 'trip' ? 'trip' : 'location'} with you — tap Friends › Sharing to view`);
   }
   lastShareIds = ids;
+  refreshBadges();
   // my active trip share ended remotely (declined / unfriended / blocked / expired)?
   if (ctx.activeTripShare && !shares.some((s) => s.id === ctx.activeTripShare && s.status !== 'ended')) ctx.activeTripShare = null;
   // refresh the route sheet's share line only when that share's state actually changed
@@ -98,9 +117,28 @@ async function refreshShares() {
   const key = sh ? `${sh.id}:${sh.status}:${sh.live}` : '';
   if (key !== ctx.shareKey) { ctx.shareKey = key; if (state.destination && state.routes.length && !state.navigating && !state.routing) renderRouteSheet(); }
 }
+// ---------- tab badges ----------
+// Activity: things waiting for the user (friend requests + trip invitations). Friends: a live dot while you share.
+let socialAt = 0, lastReqIds = null;
+async function refreshBadges(force = false) {
+  if (!state.user) { setBadge('activity'); setBadge('friends'); lastReqIds = null; return; }
+  if (force || !ctx.lastSocial || Date.now() - socialAt > 30000) {
+    try { ctx.lastSocial = await ctx.backend.listSocial(); socialAt = Date.now(); } catch { /* offline: keep the last counts */ }
+  }
+  const social = ctx.lastSocial;
+  setAttention(attentionCount(social, ctx.shares));
+  const sharing = ctx.shares.some((s) => s.direction === 'outgoing' && s.status !== 'ended' && s.status !== 'invited');
+  setBadge('friends', { dot: sharing, label: sharing ? 'you are sharing live' : '' });
+  const ids = (social?.incoming || []).map((r) => r.id);
+  if (lastReqIds && prefs().notifyRequests) for (const r of social.incoming) if (!lastReqIds.includes(r.id)) toast(`${r.from.alias} sent you a friend request — see Activity`);
+  lastReqIds = ids;
+}
+function setAttention(n) { setBadge('activity', { count: n, label: n ? `${n} waiting for you` : '' }); }
+
 function focusShare(id) {
   const s = ctx.shares.find((x) => x.id === id);
   if (!s) return;
+  ctx.showTab?.('map');
   if (s.lastPos) ctx.map.flyTo([s.lastPos.lat, s.lastPos.lng], 16);
   openShareViewer(ctx, s);
 }
@@ -131,8 +169,8 @@ function showHome() {
       el('h2', {}, 'Where to?'),
       el('span', { class: `chip ${live ? 'live' : 'sample'}` }, live ? 'Live routing' : 'Sample routes')),
     el('p', { class: 'muted small', style: 'margin:0 0 10px' },
-      live ? 'Routes use public ways from OpenStreetMap, plus moderator-approved community paths whenever they make a trip quicker.'
-           : 'No routing key is configured, so routes between these sample places are hand-made examples. Other destinations get a labelled straight-line estimate.'),
+      live ? 'OpenStreetMap routes, plus moderator-approved community paths when they make a trip quicker.'
+           : 'Sample routes between these places; other destinations get a labelled straight-line estimate.'),
     el('div', { class: 'row wrap', style: 'margin-bottom:12px' },
       ...quick.map((p) => el('button', { class: 'btn sm', onclick: () => setDestination({ ...p, source: 'sample' }) }, p.kind === 'park' ? '🌳' : p.kind === 'transport' ? '🚉' : '📍', ' ', p.name.replace('Coventry ', ''))),
       state.user ? el('button', { class: 'btn sm', onclick: () => openGoToFriend(ctx) }, '🫂 Go to a friend') : null),
@@ -140,12 +178,10 @@ function showHome() {
       el('div', { class: 'stat' }, el('strong', {}, String(nearby)), el('span', {}, 'active alerts nearby')),
       el('div', { class: 'stat' }, el('strong', {}, String(state.paths.filter((p) => p.status === 'approved').length)), el('span', {}, 'community paths approved')),
       el('button', { class: 'btn sm', onclick: () => openAlertsList() }, 'View alerts')),
-    state.user
-      ? el('div', { class: 'notice info' }, `Signed in as ${esc(state.user.alias)}. Report hazards or suggest missing paths from the buttons on the map.`)
-      : el('div', { class: 'notice' }, 'You are exploring as a guest. Sign in to report alerts, suggest paths and earn points. ',
-          el('a', { href: '#', onclick: (e) => { e.preventDefault(); openAccount(ctx); } }, 'Sign in / create account')),
-    el('p', { class: 'small', style: 'color:var(--text-3);margin:8px 0 0' }, 'Route labels describe what a route is built from — they are not safety ratings. Always use your own judgement. ',
-      el('a', { href: '#', onclick: (e) => { e.preventDefault(); openAppearance(ctx); } }, 'Change colourway')),
+    state.user ? null
+      : el('div', { class: 'notice' }, 'Guest mode — routes are all yours. ',
+          el('a', { href: '#', onclick: (e) => { e.preventDefault(); openAccount(ctx); } }, 'Sign in'), ' to report, add paths and earn points.'),
+    el('p', { class: 'small', style: 'color:var(--text-3);margin:8px 0 0' }, 'Route labels describe what a route is built from — they are not safety ratings. Always use your own judgement.'),
   ]);
 }
 
@@ -534,7 +570,7 @@ function showTripPointsNotice(next) {
       el('div', { class: 'consent-row' }, '🙈', el('div', {}, el('strong', {}, 'Who sees it'), el('div', { class: 'small muted' }, 'Nobody. Leaderboards never show locations, routes or distances.')))),
     el('button', { class: 'btn primary block', style: 'margin-top:12px', onclick: () => choose(true) }, 'Earn trip points'),
     el('button', { class: 'btn block ghost', style: 'margin-top:8px', onclick: () => choose(false) }, 'Navigate without trip points'),
-    el('p', { class: 'small', style: 'color:var(--text-3);margin-top:8px' }, 'You can change this any time under Points & levels › How it works.'),
+    el('p', { class: 'small', style: 'color:var(--text-3);margin-top:8px' }, 'You can change this any time in Profile › Privacy & visibility.'),
   ], { onClose: () => { try { localStorage.setItem('gw:tripPointsNotice', '1'); } catch { /* ignore */ } } });
 }
 function startTripTracking(r) {
@@ -654,12 +690,12 @@ function onNavTick(pos) {
 // ---------- map controls, layers, fabs ----------
 $('#zoomIn').addEventListener('click', () => ctx.map.zoomIn());
 $('#zoomOut').addEventListener('click', () => ctx.map.zoomOut());
-$('#layersBtn').addEventListener('click', () => { $('#layersPanel').hidden = !$('#layersPanel').hidden; });
+$('#layersBtn').addEventListener('click', () => { const p = $('#layersPanel'); p.hidden = !p.hidden; $('#layersBtn').setAttribute('aria-expanded', String(!p.hidden)); });
+document.addEventListener('click', (e) => { const p = $('#layersPanel'); if (!p.hidden && !e.target.closest('#layersPanel') && !e.target.closest('#layersBtn')) { p.hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false'); } });
 $('#layerAlerts').addEventListener('change', (e) => { state.layers.alerts = e.target.checked; ctx.map.toggleAlerts(e.target.checked); });
 $('#layerPaths').addEventListener('change', (e) => { state.layers.paths = e.target.checked; ctx.map.togglePaths(e.target.checked); });
 $('#layerPending').addEventListener('change', (e) => { state.layers.pending = e.target.checked; ctx.map.renderPaths(state.paths, { showPending: e.target.checked, myId: state.user?.id }); });
 $('#brandBtn').addEventListener('click', () => { closeModal(); if (!state.navigating) showHome(); });
-$('#profileBtn').addEventListener('click', () => openAccount(ctx));
 $('#reportBtn').addEventListener('click', () => {
   if (state.navigating && state.mode === 'drive') { toast('Reporting is off while driving. Pull over safely first, or report later.'); return; }
   if (!requireSignIn(ctx, 'report an alert')) return;
@@ -667,4 +703,3 @@ $('#reportBtn').addEventListener('click', () => {
   else { ctx.pickingAlert = true; toast('Tap the map where the issue is'); }
 });
 $('#suggestBtn').addEventListener('click', () => { if (requireSignIn(ctx, 'suggest a path')) startSuggestPath(ctx); });
-$('#friendsBtn').addEventListener('click', () => openFriends(ctx));
