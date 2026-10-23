@@ -1,6 +1,6 @@
 /* GettoWayz service worker — caches the app shell for offline launch.
    Map tiles, routing and search are network-only (never cached as "live"). */
-const CACHE = 'gw-shell-v15';
+const CACHE = 'gw-shell-v16';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest', './icons/icon.svg',
   './js/app.js', './js/config.js', './js/util.js', './js/map.js', './js/basemap.js', './js/state.js',
@@ -17,13 +17,14 @@ self.addEventListener('activate', (e) => {
 self.addEventListener('fetch', (e) => {
   const url = new URL(e.request.url);
   if (url.origin !== self.location.origin || e.request.method !== 'GET') return; // network for tiles/APIs/CDNs
+  // Network first (revalidated, so a normal refresh always gets the latest deploy); the cache is only the offline fallback.
   e.respondWith(
-    caches.match(e.request).then((hit) => hit || fetch(e.request).then((res) => {
+    fetch(e.request, { cache: 'no-cache' }).then((res) => {
       if (res.ok && SHELL.some((p) => url.pathname.endsWith(p.replace('./', '/')))) {
         const copy = res.clone();
         caches.open(CACHE).then((c) => c.put(e.request, copy));
       }
       return res;
-    }).catch(() => caches.match('./index.html')))
+    }).catch(() => caches.match(e.request).then((hit) => hit || caches.match('./index.html')))
   );
 });

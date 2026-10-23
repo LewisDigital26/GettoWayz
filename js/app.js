@@ -68,7 +68,11 @@ registerPage('profile', 'Profile', renderProfilePage);
 
 // ---------- boot ----------
 if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  // Reload once when a new version takes over, so one refresh is always enough to get the latest deploy.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded && !state.navigating && !state.draw) { reloaded = true; location.reload(); } });
+  window.addEventListener('load', () => navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update?.()).catch(() => {}));
 }
 
 ctx.map = new GwMap($('#map'), {
