@@ -14,11 +14,13 @@ import { openReportFlow, openAlertDetail, alertsNearRoute } from './ui/alerts.js
 import { startSuggestPath, openPathDetail } from './ui/paths.js';
 import { openAccount, requireSignIn, updateAvatar, openAppearance } from './ui/account.js';
 import { createRealtime } from './providers/realtime.js';
-import { openFriends, openShareTrip, askGoLive, openGoToFriend, shareForDestination, openCheckIn, renderShareBanner, openShareViewer, freshness } from './ui/friends.js';
+import { openFriends, openShareTrip, askGoLive, openGoToFriend, shareForDestination, renderShareBanner, openShareViewer, freshness } from './ui/friends.js';
 import { createStreetlightProvider } from './providers/streetlights.js';
 import { Streetlights, lightingBlock } from './ui/streetlights.js';
 import { STREETLIGHTS } from './backend/rules.js';
 import { communityRoutes } from './providers/communityRouting.js';
+import { TRIP } from './backend/pointsPolicy.js';
+import { showTripResult } from './ui/points.js';
 
 // ---------- services ----------
 export const ctx = {
@@ -497,6 +499,8 @@ $$('#modebar button').forEach((b) => b.addEventListener('click', () => {
 async function startNavigation() {
   const r = selectedRoute();
   if (!r) return;
+  // Explain trip points once, before the trip — never during it.
+  if (state.user && r.source !== 'estimate' && !tripNoticeSeen()) return showTripPointsNotice(() => startNavigation());
   if (state.user && r.source !== 'estimate') {
     // Already shared while planning? Offer live progress for this trip (opt-in, per trip).
     const existing = shareForDestination(ctx.shares, state.destination);
@@ -514,8 +518,40 @@ async function startNavigation() {
   }
   beginNavigation(r);
 }
+// ---------- verified trips (points) ----------
+const tripNoticeSeen = () => { try { return localStorage.getItem('gw:tripPointsNotice') === '1'; } catch { return true; } };
+function showTripPointsNotice(next) {
+  const choose = async (on) => {
+    try { localStorage.setItem('gw:tripPointsNotice', '1'); } catch { /* ignore */ }
+    try { await ctx.backend.setPointsPrefs({ tripPoints: on }); set({ user: ctx.backend.currentUser() }); } catch (e) { toast(e.message, 'error'); }
+    closeModal(); next();
+  };
+  openModal('Earn points for this trip?', [
+    el('p', {}, `Finished trips can earn points (more for longer walks and rides, up to ${TRIP.maxPerTrip} per trip). Points arrive after you arrive — nothing pops up while you travel.`),
+    el('div', { class: 'consent' },
+      el('div', { class: 'consent-row' }, '📍', el('div', {}, el('strong', {}, 'What is used'), el('div', { class: 'small muted' }, `A coarse position check about every ${TRIP.checkpointEverySec} s while navigating, to confirm progress along your route.`))),
+      el('div', { class: 'consent-row' }, '🗑️', el('div', {}, el('strong', {}, 'What is kept'), el('div', { class: 'small muted' }, 'Only the latest check during the trip. It is deleted with the route when the trip ends; your points history keeps the points, not the place.'))),
+      el('div', { class: 'consent-row' }, '🙈', el('div', {}, el('strong', {}, 'Who sees it'), el('div', { class: 'small muted' }, 'Nobody. Leaderboards never show locations, routes or distances.')))),
+    el('button', { class: 'btn primary block', style: 'margin-top:12px', onclick: () => choose(true) }, 'Earn trip points'),
+    el('button', { class: 'btn block ghost', style: 'margin-top:8px', onclick: () => choose(false) }, 'Navigate without trip points'),
+    el('p', { class: 'small', style: 'color:var(--text-3);margin-top:8px' }, 'You can change this any time under Points & levels › How it works.'),
+  ], { onClose: () => { try { localStorage.setItem('gw:tripPointsNotice', '1'); } catch { /* ignore */ } } });
+}
+function startTripTracking(r) {
+  ctx.activeTrip = null;
+  if (!state.user || state.user.tripPoints === false || r.source === 'estimate' || !r.geometry?.length) return;
+  ctx.backend.startTrip?.(state.mode, r.geometry).then((id) => { if (state.navigating) ctx.activeTrip = { id, lastSent: 0 }; }).catch(() => {}); // silent: never interrupt navigation
+}
+function sendTripCheckpoint(pos) {
+  const t = ctx.activeTrip;
+  if (!t || Date.now() - t.lastSent < TRIP.checkpointEverySec * 1000) return;
+  t.lastSent = Date.now();
+  ctx.backend.tripCheckpoint(t.id, { lat: pos.lat, lng: pos.lng }).catch(() => {});
+}
+
 function beginNavigation(r) {
   arrivedShown = false;
+  startTripTracking(r);
   set({ navigating: true });
   hideSheet(true);
   $('#navbar').hidden = false; $('#fabs').hidden = true; $('#modebar').hidden = true; $('.topbar').hidden = true;
@@ -535,16 +571,14 @@ function beginNavigation(r) {
   }
 }
 function endNavigation() {
-  const r = selectedRoute(), dest = state.destination;
-  const shareId = ctx.activeTripShare;
-  const finish = () => {
-    if (shareId) ctx.backend.stopShare(shareId, 'cancelled').then(refreshShares).catch(() => {}); // ending navigation ends trip sharing
-    ctx.activeTripShare = null;
-    exitNavigationUi();
-  };
-  if (state.user && r && dest && r.source !== 'estimate') {
-    openCheckIn(ctx, { shareId, route: r, dest }, (res) => { if (res) { ctx.activeTripShare = null; exitNavigationUi(); } else finish(); });
-  } else finish();
+  const shareId = ctx.activeTripShare, trip = ctx.activeTrip;
+  const pos = state.position ? { lat: state.position.lat, lng: state.position.lng } : null;
+  ctx.activeTripShare = null; ctx.activeTrip = null;
+  if (shareId) ctx.backend.stopShare(shareId, 'cancelled').then(refreshShares).catch(() => {}); // ending navigation ends trip sharing
+  exitNavigationUi();
+  // The server checks the trip and decides any points — only now, after navigation has ended.
+  if (trip) ctx.backend.finishTrip(trip.id, pos).then((res) => { set({ user: ctx.backend.currentUser() }); updateAvatar(); showTripResult(res); })
+    .catch((e) => toast(navigator.onLine ? `Trip couldn't be checked: ${e.message}` : 'Offline — this trip could not be checked for points.', 'error'));
 }
 let arrivedShown = false;
 function exitNavigationUi() {
@@ -592,6 +626,7 @@ function stopVoice() { if (speechOk()) try { speechSynthesis.cancel(); } catch {
 /** On arrival, send one final position (so the server can verify it) and end trip sharing straight away. */
 async function shareArrived(pos) {
   const id = ctx.activeTripShare; if (!id) return;
+  ctx.activeTripShare = null; // claimed here so endNavigation doesn't also end it as "cancelled"
   try { await ctx.backend.updateSharePosition(id, { lat: pos.lat, lng: pos.lng }); await ctx.backend.stopShare(id, 'arrived'); } catch { /* already ended */ }
   refreshShares();
 }
@@ -607,9 +642,10 @@ function onNavTick(pos) {
   for (let i = 0; i < r.steps.length; i++) { acc += r.steps[i].dist; if (done < acc) { stepI = i; break; } stepI = i; }
   if (haversine(me, r.geometry[r.geometry.length - 1]) < 25) {
     showStep(r.steps.length - 1, r, 0);
-    if (!arrivedShown) { arrivedShown = true; toast('You have arrived 🎉', 'success'); shareArrived(pos); if (state.user && r.source !== 'estimate') endNavigation(); }
+    if (!arrivedShown) { arrivedShown = true; toast('You have arrived 🎉', 'success'); shareArrived(pos); if (ctx.activeTrip) ctx.activeTrip.lastSent = 0; if (state.user && r.source !== 'estimate') endNavigation(); }
     return;
   }
+  sendTripCheckpoint(pos);
   if (bestD > 80) toast('You look off-route — directions may not match where you are', 'error');
   showStep(stepI, r, remaining);
   ctx.map.map.panTo(me, { animate: true });
@@ -625,6 +661,7 @@ $('#layerPending').addEventListener('change', (e) => { state.layers.pending = e.
 $('#brandBtn').addEventListener('click', () => { closeModal(); if (!state.navigating) showHome(); });
 $('#profileBtn').addEventListener('click', () => openAccount(ctx));
 $('#reportBtn').addEventListener('click', () => {
+  if (state.navigating && state.mode === 'drive') { toast('Reporting is off while driving. Pull over safely first, or report later.'); return; }
   if (!requireSignIn(ctx, 'report an alert')) return;
   if (state.position) openReportFlow(ctx, [state.position.lat, state.position.lng], { fromGps: true });
   else { ctx.pickingAlert = true; toast('Tap the map where the issue is'); }
