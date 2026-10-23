@@ -4,7 +4,8 @@ import { state, set, selectedRoute } from '../state.js';
 import { SHARE_DURATIONS, SHARE_STALE_SECONDS, SHARE_LOST_SECONDS, FRIEND_LIMITS } from '../backend/rules.js';
 import { openModal, closeModal, isModalOpen } from './modal.js';
 import { toast } from './sheet.js';
-import { requireSignIn } from './account.js';
+import { requireSignIn, guestState } from './account.js';
+import { avatar } from './avatar.js';
 
 const once = (fn) => { let called = false; return (v) => { if (!called) { called = true; fn?.(v); } }; };
 const clock = (iso) => { const d = new Date(iso); return `${d.getHours()}:${String(d.getMinutes()).padStart(2, '0')}`; };
@@ -24,41 +25,110 @@ export function freshness(share) {
 }
 
 // ============================================================
-// Friends screen
+// Friends tab
 // ============================================================
-export async function openFriends(ctx, tab = 'friends') {
-  if (!requireSignIn(ctx, 'add friends and share trips')) return;
-  const social = await ctx.backend.listSocial();
-  const shares = await ctx.backend.listShares();
-  const tabs = el('div', { class: 'tabs' });
-  const body = el('div');
+let friendsSub = 'friends';
+/** Open the Friends tab (optionally on a sub-tab). Closes any open modal first. */
+export function openFriends(ctx, tab = 'friends') {
+  closeModal();
+  friendsSub = tab;
+  ctx.refreshBadges?.();
+  if (ctx.currentTab?.() === 'friends') ctx.refreshPage('friends'); else ctx.showTab?.('friends', { focus: true });
+}
+
+export async function renderFriendsPage(ctx, page) {
+  page.setActions();
+  if (!state.user) return guestState(ctx, {
+    icon: '🫂', title: 'Friends & trip sharing',
+    text: 'Add friends by their Ghetto Wayz ID, then choose — one trip at a time — who can follow your route.',
+    bullets: ['Nobody sees you unless you accept them as a friend', 'Sharing is always with one friend and time-limited', 'Your live location is never shown without your say-so'],
+    action: 'add friends and share trips',
+  });
+  const [social, shares] = await Promise.all([ctx.backend.listSocial(), ctx.backend.listShares()]);
+  const sub = el('div', { class: 'page-sub' });
+  const tabs = el('div', { class: 'subtabs', role: 'tablist', 'aria-label': 'Friends sections' });
   const views = {
     friends: () => friendsTab(ctx, social, shares),
     requests: () => requestsTab(ctx, social),
     sharing: () => sharingTab(ctx, shares),
   };
-  const labels = { friends: `Friends (${social.friends.length})`, requests: `Requests${social.incoming.length ? ` (${social.incoming.length})` : ''}`, sharing: `Sharing${shares.filter((s) => s.status !== 'ended').length ? ' ●' : ''}` };
-  for (const k of Object.keys(views)) tabs.append(el('button', { class: k === tab ? 'active' : '', onclick: () => openFriends(ctx, k) }, labels[k]));
-  body.append(views[tab]());
+  const activeCount = shares.filter((s) => s.status !== 'ended').length;
+  const labels = {
+    friends: [`Friends`, social.friends.length ? el('span', { class: 'muted' }, ` ${social.friends.length}`) : null],
+    requests: ['Requests', social.incoming.length ? el('span', { class: 'count', 'aria-label': `${social.incoming.length} new` }, String(social.incoming.length)) : null],
+    sharing: ['Sharing', activeCount ? el('span', { class: 'muted' }, ` ${activeCount}`) : null],
+  };
+  const draw = () => {
+    tabs.replaceChildren(...Object.keys(views).map((k) => el('button', { role: 'tab', id: `ft-${k}`, 'aria-selected': String(k === friendsSub), 'aria-controls': 'friends-panel', tabindex: k === friendsSub ? '0' : '-1',
+      onclick: () => { friendsSub = k; draw(); },
+      onkeydown: (e) => { const ks = Object.keys(views); const i = ks.indexOf(k); const n = e.key === 'ArrowRight' ? ks[(i + 1) % ks.length] : e.key === 'ArrowLeft' ? ks[(i + ks.length - 1) % ks.length] : null; if (n) { friendsSub = n; draw(); tabs.querySelector(`#ft-${n}`).focus(); } } }, ...labels[k])));
+    sub.replaceChildren(el('div', { role: 'tabpanel', id: 'friends-panel', 'aria-labelledby': `ft-${friendsSub}` }, views[friendsSub]()));
+  };
+  draw();
 
-  const idRow = el('div', { class: 'card idcard' },
-    el('div', { class: 'small muted' }, 'Your Ghetto Wayz ID — share it with people you want to add'),
-    el('div', { class: 'row between' }, el('code', { class: 'gwid' }, social.gwId), el('button', { class: 'btn sm', onclick: (e) => copyText(social.gwId, e.target) }, 'Copy')),
-    el('div', { class: 'small', style: 'color:var(--text-3)' }, 'Your ID reveals only your alias. Never your location, email or points.'));
+  const idRow = el('div', { class: 'hero idcard' },
+    el('div', { class: 'row' }, avatar(state.user.alias, { size: 44 }),
+      el('div', { style: 'flex:1;min-width:0' },
+        el('div', { class: 'small muted' }, 'Your Ghetto Wayz ID'),
+        el('code', { class: 'gwid' }, social.gwId)),
+      el('button', { class: 'btn sm', onclick: (e) => copyText(social.gwId, e.currentTarget) }, 'Copy')),
+    el('div', { class: 'small', style: 'color:var(--text-3);margin-top:8px' }, 'Share it with people you want to add. It reveals only your alias — never your location, email or points.'));
 
-  openModal('Friends', [idRow, tabs, body,
-    !ctx.realtime.isCrossDevice ? el('div', { class: 'notice warn', style: 'margin-top:12px' }, ctx.realtime.note, ' Try adding sample user ', el('code', {}, 'GW-KERB-H0P1'), '.') : null]);
+  return el('div', {},
+    liveSharingCard(ctx, shares, () => ctx.refreshPage('friends')),
+    idRow, tabs, sub,
+    !ctx.realtime.isCrossDevice ? el('div', { class: 'notice warn', style: 'margin-top:12px' }, ctx.realtime.note, ' Try adding sample user ', el('code', {}, 'GW-KERB-H0P1'), '.') : null);
+}
+
+/**
+ * "Sharing now" — everything live right now, with Stop always one tap away. Returns null when nothing is shared.
+ * Shown on the Friends and Profile tabs (the map has its own banner).
+ */
+export function liveSharingCard(ctx, shares, onChange) {
+  const live = shares.filter((s) => s.status !== 'ended');
+  if (!live.length) return null;
+  const out = live.filter((s) => s.direction === 'outgoing'), inc = live.filter((s) => s.direction === 'incoming');
+  const stop = (s, label) => el('button', { class: 'btn sm danger', onclick: async (e) => {
+    e.currentTarget.disabled = true;
+    try { await ctx.backend.stopShare(s.id); if (ctx.activeTripShare === s.id) ctx.activeTripShare = null; toast(s.status === 'invited' ? 'Invitation cancelled' : 'Sharing stopped. Your route and position were deleted.'); ctx.refreshShares?.(); onChange?.(); }
+    catch (err) { toast(err.message, 'error'); e.currentTarget.disabled = false; } } }, label);
+  const line = (s) => {
+    const outgoing = s.direction === 'outgoing';
+    const who = outgoing ? s.to.alias : s.from.alias;
+    const what = s.type !== 'trip' ? (outgoing ? `Your live location · ends ${clock(s.endsAt)}` : `Their location · ${freshLabel(s)}`)
+      : s.status === 'invited' ? (outgoing ? `Trip invitation · waiting for them` : `Wants to share a trip with you`)
+      : outgoing ? `${modeLabel(s.trip.mode)} to ${s.trip.destName} · ${s.live ? 'live progress on' : 'route only'}`
+      : `Their trip · ${s.live ? freshLabel(s) : 'route only'}`;
+    return el('div', { class: 'item' }, avatar(who, { size: 36 }),
+      el('div', { class: 'body' }, el('div', { class: 't' }, outgoing ? `You → ${who}` : `${who} → you`), el('div', { class: 's' }, what)),
+      outgoing ? stop(s, s.status === 'invited' ? 'Cancel' : 'Stop')
+        : el('button', { class: 'btn sm', onclick: () => (s.status === 'invited' ? openShareViewer(ctx, s) : ctx.focusShare(s.id)) }, s.status === 'invited' ? 'Respond' : 'View'));
+  };
+  const sharingMine = out.some((s) => s.status !== 'invited');
+  return el('section', { class: 'live-card', 'aria-label': 'Sharing now', style: 'margin-bottom:14px' },
+    el('div', { class: 'live-head' }, el('span', { class: 'dot', 'aria-hidden': 'true' }), sharingMine ? 'You are sharing right now' : 'Sharing now'),
+    el('div', { class: 'list' }, ...out.map(line), ...inc.map(line)),
+    sharingMine ? el('p', { class: 'small muted', style: 'margin:8px 2px 0' }, 'Only the friend named can see it. Stopping deletes your shared route and position straight away.') : null);
+}
+const freshLabel = (s) => ({ live: 'live', stale: `last update ${fmtAgo(s.lastPos?.at)}`, lost: `offline · last update ${fmtAgo(s.lastPos?.at)}`, none: s.status === 'paused' ? 'paused' : 'waiting for first update' }[freshness(s)]);
+
+/** "Share a trip" from a friend's card: uses the route planned on the map, or explains how to plan one. */
+function shareTripWith(ctx, f) {
+  const r = selectedRoute();
+  ctx.showTab('map');
+  if (state.destination && r && r.source !== 'estimate' && !state.navigating) openShareTrip(ctx, () => ctx.refreshShares?.(), { preselect: f.id });
+  else toast(`Plan a route on the map first, then tap “Share route with a friend” and pick ${f.alias}.`);
 }
 
 function friendsTab(ctx, social, shares) {
-  const idInput = el('input', { placeholder: 'GW-XXXX-XXXX', autocapitalize: 'characters', spellcheck: 'false', maxlength: '14', id: 'friendIdInput' });
+  const idInput = el('input', { placeholder: 'GW-XXXX-XXXX', autocapitalize: 'characters', spellcheck: 'false', maxlength: '14', id: 'friendIdInput', autocomplete: 'off', onkeydown: (e) => { if (e.key === 'Enter') find.click(); } });
   const result = el('div');
   const find = el('button', { class: 'btn primary', onclick: async () => {
     find.disabled = true; result.replaceChildren(el('div', { class: 'loading-row' }, el('span', { class: 'spinner' }), 'Looking up ID…'));
     try {
       const u = await ctx.backend.lookupId(idInput.value);
       result.replaceChildren(u
-        ? el('div', { class: 'item' }, el('div', { class: 'emoji' }, '👤'), el('div', { class: 'body' }, el('div', { class: 't' }, esc(u.alias), u.sample ? el('span', { class: 'chip sample', style: 'margin-left:6px' }, 'Sample') : ''), el('div', { class: 's' }, u.gwId)),
+        ? el('div', { class: 'item', style: 'align-items:center' }, avatar(u.alias, { size: 40 }), el('div', { class: 'body' }, el('div', { class: 't' }, u.alias, u.sample ? el('span', { class: 'chip sample', style: 'margin-left:6px' }, 'Sample') : ''), el('div', { class: 's' }, u.gwId)),
             el('button', { class: 'btn sm primary', onclick: async (e) => { try { await ctx.backend.sendFriendRequest(u.id); toast('Request sent — they need to accept before either of you can see the other', 'success'); openFriends(ctx, 'requests'); } catch (err) { toast(err.message, 'error'); } } }, 'Send request'))
         : el('div', { class: 'notice' }, 'No user with that ID. Check the letters and dashes.'));
     } catch (e) { result.replaceChildren(el('div', { class: 'notice danger' }, e.message)); }
@@ -70,33 +140,35 @@ function friendsTab(ctx, social, shares) {
         const out = shares.find((s) => s.direction === 'outgoing' && s.to.id === f.id && s.status !== 'ended');
         const inc = shares.find((s) => s.direction === 'incoming' && s.from.id === f.id && s.status !== 'ended');
         return el('div', { class: 'item' },
-          el('div', { class: 'emoji' }, '👤'),
+          avatar(f.alias, { size: 40 }),
           el('div', { class: 'body' },
-            el('div', { class: 't' }, esc(f.alias), f.sample ? el('span', { class: 'chip sample', style: 'margin-left:6px' }, 'Sample') : ''),
+            el('div', { class: 't' }, f.alias, f.sample ? el('span', { class: 'chip sample', style: 'margin-left:6px' }, 'Sample') : ''),
             el('div', { class: 's' }, f.gwId),
             el('div', { class: 'meta' },
               out ? el('span', { class: 'chip accent' }, out.type === 'trip' ? (out.status === 'invited' ? 'Trip invite sent' : 'Sharing trip') : 'Sharing location') : null,
               inc ? el('span', { class: 'chip verified' }, inc.type === 'trip' ? (inc.status === 'invited' ? 'Trip invitation' : 'Following their trip') : 'Can see their location') : null),
             el('div', { class: 'row wrap', style: 'margin-top:8px' },
-              el('button', { class: 'btn sm primary', onclick: () => openShareLocation(ctx, f) }, '📡 Share location'),
-              inc ? el('button', { class: 'btn sm', onclick: () => { closeModal(); ctx.focusShare(inc.id); } }, 'View') : null,
-              f.sample ? el('button', { class: 'btn sm ghost', onclick: async () => { try { await ctx.backend.demoSimulateIncomingTrip(f.id); closeModal(); toast('Sample trip started — this is scripted demo movement, not a real person', 'success'); } catch (e) { toast(e.message, 'error'); } } }, '▶ Simulate their trip') : null,
-              el('button', { class: 'btn sm ghost', onclick: () => openFriendOptions(ctx, f) }, '⋯'))));
+              el('button', { class: 'btn sm primary', onclick: () => shareTripWith(ctx, f) }, '🧭 Share a trip'),
+              el('button', { class: 'btn sm', onclick: () => openShareLocation(ctx, f) }, '📡 Share location'),
+              inc ? el('button', { class: 'btn sm', onclick: () => (inc.status === 'invited' ? openShareViewer(ctx, inc) : ctx.focusShare(inc.id)) }, inc.status === 'invited' ? 'Respond' : 'View') : null,
+              f.sample ? el('button', { class: 'btn sm ghost', onclick: async () => { try { await ctx.backend.demoSimulateIncomingTrip(f.id); ctx.showTab('map'); toast('Sample trip started — this is scripted demo movement, not a real person', 'success'); } catch (e) { toast(e.message, 'error'); } } }, '▶ Simulate their trip') : null,
+              el('button', { class: 'btn sm ghost', 'aria-label': `More options for ${esc(f.alias)}`, onclick: () => openFriendOptions(ctx, f) }, '⋯'))));
       }))
-    : el('div', { class: 'empty' }, el('div', { class: 'big' }, '🫂'), 'No friends yet. Add someone by their ID.');
+    : el('div', { class: 'empty' }, el('div', { class: 'big', 'aria-hidden': 'true' }, '🫂'), 'No friends yet. Add someone by their Ghetto Wayz ID above.');
 
   return el('div', {},
-    el('div', { class: 'field' }, el('label', {}, 'Add a friend by ID'), el('div', { class: 'row' }, idInput, find), el('span', { class: 'hint' }, `They must accept before either of you can see the other. Limit ${FRIEND_LIMITS.idLookupsPerHour} searches/hour, ${FRIEND_LIMITS.requestsPerDay} requests/day.`)),
+    el('div', { class: 'field' }, el('label', { for: 'friendIdInput' }, 'Add a friend by ID'), el('div', { class: 'row' }, idInput, find), el('span', { class: 'hint' }, `They must accept before either of you can see the other. Limit ${FRIEND_LIMITS.idLookupsPerHour} searches/hour, ${FRIEND_LIMITS.requestsPerDay} requests/day.`)),
     result,
-    el('h3', { style: 'font-size:14px;margin:12px 0 6px' }, 'Your friends'), list);
+    el('h2', { class: 'pts-h' }, 'Your friends'), list,
+    el('p', { class: 'small', style: 'color:var(--text-3);margin-top:10px' }, 'You can only see a friend’s location or trip while they are sharing it with you.'));
 }
 
 function requestsTab(ctx, social) {
-  const setting = el('select', { onchange: async (e) => { await ctx.backend.setRequestSetting(e.target.value); toast(e.target.value === 'none' ? 'Incoming requests turned off' : 'Anyone with your ID can send a request'); } },
+  const setting = el('select', { id: 'reqSetting', onchange: async (e) => { await ctx.backend.setRequestSetting(e.target.value); toast(e.target.value === 'none' ? 'Incoming requests turned off' : 'Anyone with your ID can send a request'); } },
     el('option', { value: 'anyone', selected: social.requestSetting === 'anyone' }, 'Anyone with my ID'),
     el('option', { value: 'none', selected: social.requestSetting === 'none' }, 'Nobody (turn off requests)'));
   return el('div', {},
-    el('div', { class: 'field' }, el('label', {}, 'Who can send me requests'), setting),
+    el('div', { class: 'field' }, el('label', { for: 'reqSetting' }, 'Who can send me requests'), setting),
     el('h3', { style: 'font-size:14px;margin:12px 0 6px' }, 'Incoming'),
     social.incoming.length ? el('div', { class: 'list' }, ...social.incoming.map((r) => el('div', { class: 'item' }, el('div', { class: 'emoji' }, '📨'),
       el('div', { class: 'body' }, el('div', { class: 't' }, esc(r.from.alias)), el('div', { class: 's' }, `${r.from.gwId} · ${fmtAgo(r.createdAt)}`),
@@ -142,6 +214,7 @@ export function openShareLocation(ctx, friend) {
       await ctx.backend.updateSharePosition(s.id, state.position);
       ctx.locate({ follow: true });
       closeModal(); toast(`Sharing your location with ${esc(friend.alias)} until ${clock(s.endsAt)}`, 'success');
+      ctx.refreshShares?.(); ctx.refreshPage?.();
     } catch (e) { toast(e.message, 'error'); start.textContent = 'Start sharing'; start.disabled = false; }
   };
   const start = el('button', { class: 'btn primary block', onclick: () => {
@@ -197,7 +270,7 @@ export async function openShareTrip(ctx, onDone, opts = {}) {
   if (!social.friends.length) {
     openModal('Share route with a friend', [
       el('div', { class: 'empty' }, el('div', { class: 'big' }, '🫂'), 'You need an accepted friend to share a route.'),
-      el('button', { class: 'btn primary block', onclick: () => { closeModal(); done(null); ctx.openFriends?.(); } }, 'Add a friend'),
+      el('button', { class: 'btn primary block', onclick: () => { closeModal(); done(null); openFriends(ctx); } }, 'Add a friend'),
       el('button', { class: 'btn block ghost', style: 'margin-top:8px', onclick: () => { closeModal(); done(null); } }, opts.navigating ? 'Navigate without sharing' : 'Close')], { onClose: () => done(null) });
     return;
   }
@@ -262,7 +335,7 @@ export async function openGoToFriend(ctx) {
       el('div', { class: 'body' }, el('div', { class: 't' }, esc(f.alias)),
         el('div', { class: 's' }, sh ? `Location from ${clock(sh.lastPos.at)}${fr === 'live' ? ' · live' : ` · last update ${fmtAgo(sh.lastPos.at)}`}` : 'Not sharing their location with you')),
       sh ? el('button', { class: 'btn sm primary', onclick: () => {
-        closeModal();
+        closeModal(); ctx.showTab?.('map');
         if (fr !== 'live') toast(`${esc(f.alias)}'s location is from ${fmtAgo(sh.lastPos.at)} — they may have moved`, 'error');
         ctx.setDestination({ id: 'friend-' + f.id, name: `${f.alias} (location at ${clock(sh.lastPos.at)})`, sub: 'Friend’s shared location — a snapshot, it does not follow them', lat: sh.lastPos.lat, lng: sh.lastPos.lng, source: 'friend', friendId: f.id });
       } }, 'Route here') : null);
@@ -338,8 +411,8 @@ export function openShareViewer(ctx, share) {
         await ctx.backend.respondTripShare(share.id, accept);
         closeModal();
         toast(accept ? `You're following ${esc(share.from.alias)}'s trip. You'll see their progress while they share it live.` : 'Invitation declined', accept ? 'success' : undefined);
-        ctx.refreshData?.();
-      } catch (e) { closeModal(); toast(e.message, 'error'); ctx.refreshData?.(); }
+        ctx.refreshData?.(); ctx.refreshPage?.();
+      } catch (e) { closeModal(); toast(e.message, 'error'); ctx.refreshData?.(); ctx.refreshPage?.(); }
     };
     btns.replaceChildren(el('button', { class: 'btn primary', onclick: () => respond(true) }, 'Accept'), el('button', { class: 'btn', onclick: () => respond(false) }, 'Decline'));
     return openModal(`${esc(share.from.alias)} wants to share a trip`, [
@@ -379,9 +452,9 @@ export function openShareViewer(ctx, share) {
     body.push(card);
   }
   body.push(el('div', { class: 'row wrap', style: 'margin-top:10px' },
-    share.lastPos ? el('button', { class: 'btn primary', onclick: () => { closeModal(); ctx.map.flyTo([share.lastPos.lat, share.lastPos.lng], 16); } }, 'Show on map')
-      : share.trip?.geometry ? el('button', { class: 'btn primary', onclick: () => { closeModal(); const g = share.trip.geometry; ctx.map.flyTo(g[Math.floor(g.length / 2)], 15); } }, 'Show route') : null,
-    share.type === 'trip' ? el('button', { class: 'btn', onclick: async () => { try { await ctx.backend.stopShare(share.id); toast('You stopped following this trip'); } catch (e) { toast(e.message, 'error'); } closeModal(); } }, 'Stop following') : null,
+    share.lastPos ? el('button', { class: 'btn primary', onclick: () => { closeModal(); ctx.showTab?.('map'); ctx.map.flyTo([share.lastPos.lat, share.lastPos.lng], 16); } }, 'Show on map')
+      : share.trip?.geometry ? el('button', { class: 'btn primary', onclick: () => { closeModal(); ctx.showTab?.('map'); const g = share.trip.geometry; ctx.map.flyTo(g[Math.floor(g.length / 2)], 15); } }, 'Show route') : null,
+    share.type === 'trip' ? el('button', { class: 'btn', onclick: async () => { try { await ctx.backend.stopShare(share.id); toast('You stopped following this trip'); ctx.refreshShares?.(); ctx.refreshPage?.(); } catch (e) { toast(e.message, 'error'); } closeModal(); } }, 'Stop following') : null,
     el('button', { class: 'btn ghost', onclick: () => { closeModal(); openShareLocation(ctx, share.from); } }, 'Share mine back')));
   body.push(el('p', { class: 'small', style: 'color:var(--text-3);margin-top:8px' }, 'Sharing back is a separate choice — seeing their trip does not give them your location.'));
   openModal(title, body);
