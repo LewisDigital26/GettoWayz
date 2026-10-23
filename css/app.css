@@ -366,9 +366,9 @@ table.rules td:last-child { text-align: right; font-weight: 700; color: var(--ac
 .sharepill-text { flex: 1; min-width: 0; display: flex; flex-direction: column; line-height: 1.25; }
 .sharepill-text strong { font-size: 13.5px; } .sharepill-text span { font-size: 11.5px; color: var(--text-2); }
 @keyframes pulse { 0%,100% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 30%, transparent) } 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--accent) 10%, transparent) } }
-body:has(.sharebanner:not([hidden])) .modebar { top: calc(122px + var(--sat)); }
-body:has(.sharebanner:not([hidden])) .status-strip { top: calc(172px + var(--sat)); }
-body:has(.sharebanner:not([hidden])) .mapctl { top: calc(210px + var(--sat)); }
+body:has(.sharebanner:not([hidden])) .modebar { top: calc(68px + var(--share-h, 54px) + var(--sat)); }
+body:has(.sharebanner:not([hidden])) .status-strip { top: calc(118px + var(--share-h, 54px) + var(--sat)); }
+body:has(.sharebanner:not([hidden])) .mapctl { top: calc(156px + var(--share-h, 54px) + var(--sat)); }
 .gw-friend { position: relative; width: 26px; height: 26px; border-radius: 50%; background: var(--friend); border: 3px solid #fff; display: grid; place-items: center; font-weight: 800; font-size: 12px; color: #14100c; box-shadow: 0 0 0 6px color-mix(in srgb, var(--friend) 30%, transparent); }
 .gw-friend.stale { background: var(--pending); box-shadow: none; } .gw-friend.lost { background: var(--text-3); box-shadow: none; opacity: .8; }
 .gw-friend em { position: absolute; top: 28px; left: 50%; transform: translateX(-50%); white-space: nowrap; font-style: normal; font-size: 11px; font-weight: 700; color: var(--text); background: var(--bg-2); padding: 2px 7px; border-radius: 999px; box-shadow: var(--shadow); }
@@ -415,3 +415,14 @@ body:has(.sharebanner:not([hidden])) .mapctl { top: calc(210px + var(--sat)); }
 .navbar.driving .navbar-sub { font-size: 15px; }
 .navbar.driving .navbar-foot strong { font-size: 22px; }
 .navbar.driving .btn.danger { height: 52px; padding: 0 22px; font-size: 16px; }
+
+/* ---------- route sharing ---------- */
+.pick-list .item.pick { cursor: pointer; align-items: center; }
+.pick-list .item.pick input { width: 20px; height: 20px; accent-color: var(--accent); flex: none; }
+.pick-list .item.pick.on { outline: 2px solid var(--accent); outline-offset: -2px; }
+.sharepill.invited { border-color: var(--pending); } .sharepill.invited .dot { background: var(--pending); animation: none; box-shadow: none; }
+.sharepill .btn { flex: none; }
+@media (max-width: 480px) { .sharebanner .sharepill { flex-wrap: wrap; } .sharepill-text { flex-basis: calc(100% - 24px); } }
+/* While navigating, the share banner (with its Stop button) sits at the bottom, clear of the navigation card. */
+body:has(#navbar:not([hidden])) .sharebanner { top: auto; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); }
+body:has(#navbar:not([hidden])) .sharebanner .sharepill { border-width: 2px; }
