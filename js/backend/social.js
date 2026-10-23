@@ -7,9 +7,12 @@
 //   friends:  { id, from, to, status: 'pending'|'accepted', createdAt, respondedAt? }
 //   blocks:   { by, target, at }
 //   reports:  { id, by, target, reason, at }
-//   shares:   { id, from, to, type: 'location'|'trip', startedAt, endsAt, status: 'active'|'paused'|'ended',
-//               endedReason?, lastPos?: { lat, lng, at }        // ONLY the latest position — no history
-//               trip?: { destName, destLat, destLng, routeDistanceM, geometry, progressM, durationS, arrived, rewardOptIn: { [userId]: true } } }
+//   shares:   { id, from, to, type: 'location'|'trip', startedAt, endsAt, status: 'invited'|'active'|'paused'|'ended',
+//               live: boolean,                                   // trip shares: traveller's per-trip "send my position" switch
+//               endedReason?, lastPos?: { lat, lng, at }        // ONLY the latest position — no history; only while active && live
+//               route?: [[lat,lng]...]                          // trip route line — owner always; recipient only after accepting
+//               trip?: { destName, destLat, destLng, mode, routeDistanceM, progressM, durationS, arrived, acceptedAt?, rewardOptIn: { [userId]: true } } }
+// Trip shares start as 'invited'. The friend accepts ('active') or declines ('ended', reason 'declined').
 //   trips:    { id, userId, shareId?, distanceM, bonusM, at }  // completed-trip ledger for dedupe/caps (no coordinates)
 
 import { BackendError, uid, haversine, distanceToLine } from '../util.js';
@@ -49,6 +52,7 @@ export const socialMethods = {
   _endShare(s, reason) {
     s.status = 'ended'; s.endedReason = reason; s.endedAt = iso();
     delete s.lastPos; // session location data is deleted when sharing ends
+    delete s.route;
     if (s.trip) delete s.trip.geometry;
   },
 
@@ -145,7 +149,7 @@ export const socialMethods = {
   },
 
   // ---------- sharing sessions ----------
-  _startShare({ to, minutes, type, trip }) {
+  _startShare({ to, minutes, type, trip, status = 'active', live = true, route }) {
     this._ensureSocial(); this._expireShares();
     const me = this.requireUser();
     if (!this._friendship(me.id, to)) throw new BackendError('forbidden', 'You can only share with an accepted friend.');
@@ -154,20 +158,56 @@ export const socialMethods = {
     if (type === 'location' && !SHARE_DURATIONS.some((d) => d.minutes === minutes)) throw new BackendError('invalid', 'Pick one of the offered durations.');
     // one active outgoing session per friend per type
     for (const s of this.db.shares) if (s.status !== 'ended' && s.from === me.id && s.to === to && s.type === type) this._endShare(s, 'replaced');
-    const s = { id: 'sh-' + uid(), from: me.id, to, type, startedAt: iso(), endsAt: new Date(now() + minutes * 60000).toISOString(), status: 'active', trip };
+    const s = { id: 'sh-' + uid(), from: me.id, to, type, startedAt: iso(), endsAt: new Date(now() + minutes * 60000).toISOString(), status, live, trip, route };
     this.db.shares.push(s); this.save(); return this._shareView(s, me.id);
   },
   async startLocationShare(friendUserId, minutes) { return this._startShare({ to: friendUserId, minutes, type: 'location' }); },
-  async startTripShare(friendUserId, { destName, destLat, destLng, geometry, routeDistanceM, durationS, rewardOptIn }) {
+  /**
+   * Share a planned or active route with ONE accepted friend. It starts as an invitation: the friend sees who,
+   * where to, travel mode, distance and time — not the route line or any position — until they accept.
+   */
+  async startTripShare(friendUserId, { destName, mode, geometry, durationS, rewardOptIn, live = false, toFriendLocation = false }) {
+    const me = this.requireUser();
+    if (friendUserId === me.id) throw new BackendError('invalid', 'Choose a friend to share with.');
     if (!Array.isArray(geometry) || geometry.length < 2) throw new BackendError('invalid', 'No route to share.');
-    const minutes = Math.min(SHARE_MAX_MINUTES, Math.ceil((durationS / 60) * 2) + 15); // session = 2× ETA + 15 min, capped
-    const me = this.currentUser();
-    const trip = { destName, destLat, destLng, geometry, routeDistanceM, durationS, progressM: 0, arrived: false, rewardOptIn: rewardOptIn ? { [me.id]: true } : {} };
-    const view = this._startShare({ to: friendUserId, minutes, type: 'trip', trip });
-    // Demo only: a sample friend opts into shared-trip rewards after a moment, so the bonus flow can be seen.
+    const recent = this.db.shares.filter((x) => x.from === me.id && x.type === 'trip' && now() - new Date(x.startedAt) < 3600000).length;
+    if (recent >= 20) throw new BackendError('rate', 'Too many route shares in the last hour — try again later.');
+    let routeDistanceM = 0; for (let i = 1; i < geometry.length; i++) routeDistanceM += haversine(geometry[i - 1], geometry[i]); // measured, not trusted
+    const dur = Math.max(60, Math.min(6 * 3600, +durationS || routeDistanceM / 1.35));
+    const minutes = Math.min(SHARE_MAX_MINUTES, Math.ceil((dur / 60) * 2) + 15); // session = 2× ETA + 15 min, capped
+    const dest = geometry[geometry.length - 1];
+    const trip = { destName: String(destName || 'Destination').slice(0, 80), destLat: +dest[0].toFixed(5), destLng: +dest[1].toFixed(5),
+      mode: ['walk', 'bike', 'scooter', 'drive'].includes(mode) ? mode : 'walk', routeDistanceM: Math.round(routeDistanceM), durationS: Math.round(dur),
+      progressM: 0, arrived: false, toFriendLocation: !!toFriendLocation, rewardOptIn: rewardOptIn ? { [me.id]: true } : {} };
+    const view = this._startShare({ to: friendUserId, minutes, type: 'trip', trip, status: 'invited', live: !!live, route: geometry.map(([a, b]) => [a, b]) });
+    // Demo only: a sample friend accepts the invitation after a moment (and opts into rewards if you did), so the flow can be seen.
     const target = this.db.users.find((u) => u.id === friendUserId);
-    if (target?.sample && rewardOptIn) setTimeout(() => { const live = this.db.shares.find((x) => x.id === view.id); if (live && live.status !== 'ended') { live.trip.rewardOptIn[target.id] = true; this.save(); } }, 3000);
+    if (target?.sample) setTimeout(() => {
+      const x = this.db.shares.find((y) => y.id === view.id);
+      if (x && x.status === 'invited') { x.status = 'active'; x.trip.acceptedAt = iso(); if (rewardOptIn) x.trip.rewardOptIn[target.id] = true; this.save(); }
+    }, 2500);
     return view;
+  },
+  /** Recipient accepts or declines a route invitation. */
+  async respondTripShare(id, accept) {
+    this._ensureSocial(); this._expireShares();
+    const me = this.requireUser();
+    const s = this.db.shares.find((x) => x.id === id && x.to === me.id && x.type === 'trip');
+    if (!s) throw new BackendError('forbidden', 'Invitation not found.');
+    if (s.status !== 'invited') throw new BackendError('invalid', `This invitation is no longer open (${s.endedReason || s.status}).`);
+    if (!this._friendship(s.from, s.to)) { this._endShare(s, 'unfriended'); this.save(); throw new BackendError('forbidden', 'You are no longer friends, so this invitation has ended.'); }
+    if (accept) { s.status = 'active'; s.trip.acceptedAt = iso(); } else this._endShare(s, 'declined');
+    s.respondedAt = iso(); this.save();
+  },
+  /** Traveller turns live progress on/off for this trip only. Off = position deleted and no longer sent. */
+  async setTripLive(id, live) {
+    this._expireShares();
+    const s = this._ownShare(id);
+    if (s.type !== 'trip' || !['invited', 'active'].includes(s.status)) throw new BackendError('invalid', 'This route share has ended.');
+    s.live = !!live;
+    if (!s.live) delete s.lastPos;
+    else s.endsAt = new Date(Math.max(new Date(s.endsAt).getTime(), now() + Math.min(SHARE_MAX_MINUTES, Math.ceil((s.trip.durationS / 60) * 2) + 15) * 60000)).toISOString();
+    this.save();
   },
   _ownShare(id) {
     const me = this.requireUser();
@@ -175,18 +215,28 @@ export const socialMethods = {
     if (!s || s.from !== me.id) throw new BackendError('forbidden', 'Not your sharing session.');
     return s;
   },
-  async pauseShare(id) { const s = this._ownShare(id); if (s.status === 'active') { s.status = 'paused'; delete s.lastPos; } this.save(); },
+  async pauseShare(id) { const s = this._ownShare(id); if (s.status === 'active' && s.type === 'location') { s.status = 'paused'; delete s.lastPos; } this.save(); },
   async resumeShare(id) { const s = this._ownShare(id); if (s.status === 'paused' && new Date(s.endsAt) > now()) s.status = 'active'; this.save(); },
-  async stopShare(id, reason = 'stopped') { const s = this._ownShare(id); if (s.status !== 'ended') this._endShare(s, reason); this.save(); },
+  /** Traveller stops (any time), or the recipient stops following ('left'). "arrived" is only recorded at the destination. */
+  async stopShare(id, reason = 'stopped') {
+    const me = this.requireUser();
+    const s = this.db.shares.find((x) => x.id === id);
+    if (!s || (s.from !== me.id && s.to !== me.id)) throw new BackendError('forbidden', 'Not your sharing session.');
+    if (s.status === 'ended') return;
+    let r = s.to === me.id ? 'left' : (['stopped', 'cancelled', 'arrived'].includes(reason) ? reason : 'stopped');
+    if (r === 'arrived' && !(s.lastPos && s.trip && haversine([s.lastPos.lat, s.lastPos.lng], [s.trip.destLat, s.trip.destLng]) <= TRIP_LIMITS.arrivalRadiusM)) r = 'stopped';
+    this._endShare(s, r); this.save();
+  },
   /** Traveller pushes a position. Stored as the single latest sample only. */
   async updateSharePosition(id, { lat, lng }) {
     this._expireShares();
     const s = this._ownShare(id);
-    if (s.status !== 'active') return;
+    if (s.status !== 'active' || s.live === false) return; // never stored for an unaccepted invitation or with live off
     s.lastPos = { lat: +lat.toFixed(5), lng: +lng.toFixed(5), at: iso() };
-    if (s.trip && s.trip.geometry) {
+    const g = s.route || s.trip?.geometry;
+    if (s.trip && g) {
       // progress = route length − remaining from nearest vertex; monotonic, capped at route length (no detour credit)
-      const g = s.trip.geometry; let bestI = 0, bestD = Infinity;
+      let bestI = 0, bestD = Infinity;
       g.forEach((p, i) => { const d = haversine([lat, lng], p); if (d < bestD) { bestD = d; bestI = i; } });
       if (bestD < 60) {
         let rem = 0; for (let i = bestI; i < g.length - 1; i++) rem += haversine(g[i], g[i + 1]);
@@ -200,24 +250,30 @@ export const socialMethods = {
     const me = this.requireUser();
     const s = this.db.shares.find((x) => x.id === id && x.type === 'trip' && x.status !== 'ended');
     if (!s || (s.to !== me.id && s.from !== me.id)) throw new BackendError('forbidden', 'Session not found.');
+    if (s.to === me.id && s.status !== 'active') throw new BackendError('invalid', 'Accept the invitation first.');
     s.trip.rewardOptIn[me.id] = true; this.save();
   },
   _shareView(s, viewerId) {
     const isOwner = s.from === viewerId;
     const v = {
-      id: s.id, type: s.type, status: s.status, startedAt: s.startedAt, endsAt: s.endsAt, endedReason: s.endedReason, endedAt: s.endedAt,
+      id: s.id, type: s.type, status: s.status, live: s.live !== false, startedAt: s.startedAt, endsAt: s.endsAt, endedReason: s.endedReason, endedAt: s.endedAt,
+      respondedAt: s.respondedAt, sample: !!s.sample,
       from: this._publicPeer(s.from), to: this._publicPeer(s.to), direction: isOwner ? 'outgoing' : 'incoming',
     };
-    if (s.trip) v.trip = { destName: s.trip.destName, destLat: s.trip.destLat, destLng: s.trip.destLng, routeDistanceM: s.trip.routeDistanceM, durationS: s.trip.durationS, progressM: s.trip.progressM, arrived: s.trip.arrived, geometry: s.trip.geometry, rewardOptIn: s.trip.rewardOptIn, bonusPoints: s.trip.bonusPoints };
-    // ACCESS CHECK: the position is only ever returned to the recipient (and owner for their own banner).
-    if (s.lastPos && (s.to === viewerId || isOwner)) v.lastPos = s.lastPos;
+    if (s.to !== viewerId && !isOwner) return null;
+    if (s.trip) v.trip = { destName: s.trip.destName, destLat: s.trip.destLat, destLng: s.trip.destLng, mode: s.trip.mode || 'walk', routeDistanceM: s.trip.routeDistanceM, durationS: s.trip.durationS, progressM: s.trip.progressM, arrived: s.trip.arrived, acceptedAt: s.trip.acceptedAt, toFriendLocation: s.trip.toFriendLocation, rewardOptIn: s.trip.rewardOptIn, bonusPoints: s.trip.bonusPoints };
+    // ACCESS CHECK: the route line goes to the owner, and to the recipient only after they accepted.
+    const route = s.route || s.trip?.geometry;
+    if (v.trip && route && s.status !== 'ended' && (isOwner || s.status === 'active')) v.trip.geometry = route;
+    // ACCESS CHECK: the position is only ever returned to the two participants, and only while active and live.
+    if (s.lastPos && s.status === 'active' && s.live !== false) v.lastPos = s.lastPos;
     return v;
   },
   async listShares() {
     this._ensureSocial(); this._expireShares();
     const me = this.requireUser();
     const mine = this.db.shares.filter((s) => (s.from === me.id || s.to === me.id) && (s.status !== 'ended' || (s.endedAt && now() - new Date(s.endedAt) < 6 * 3600000)));
-    return mine.map((s) => this._shareView(s, me.id)).sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
+    return mine.map((s) => this._shareView(s, me.id)).filter(Boolean).sort((a, b) => new Date(b.startedAt) - new Date(a.startedAt));
   },
 
   // ---------- trip completion & rewards (verified here; replay-safe) ----------
@@ -233,7 +289,7 @@ export const socialMethods = {
     if (p.shareId) {
       share = this.db.shares.find((s) => s.id === p.shareId && s.from === me.id);
       if (!share) throw new BackendError('forbidden', 'Trip session not found.');
-      if (share.trip?.arrived) throw new BackendError('dupe', 'This trip was already checked in.');
+      if (share.trip?.arrived || this.db.trips.some((t) => t.shareId === share.id)) throw new BackendError('dupe', 'This trip was already checked in.');
     }
     if (p.position && haversine([p.position.lat, p.position.lng], [p.destLat, p.destLng]) > TRIP_LIMITS.arrivalRadiusM) {
       result.reasons.push('You are not at the destination yet, so no points were awarded.');
@@ -250,8 +306,8 @@ export const socialMethods = {
         let bonusM = 0, bonus = 0;
         if (share?.trip) {
           const opt = share.trip.rewardOptIn || {};
-          if (opt[share.from] && opt[share.to]) {
-            bonusM = share.trip.progressM > 0 ? Math.min(share.trip.progressM, routeM) : routeM;
+          if (opt[share.from] && opt[share.to] && share.trip.acceptedAt) {
+            bonusM = share.trip.progressM > 0 ? Math.min(share.trip.progressM, routeM) : 0; // only progress recorded live along the route counts
             bonus = sharedTripBonusFor(bonusM);
             const spent = todays.reduce((n, t) => n + (t.bonusPoints || 0), 0);
             bonus = Math.max(0, Math.min(bonus, SHARED_TRIP_BONUS.dailyCap - spent));
@@ -265,13 +321,18 @@ export const socialMethods = {
                 if (f) { f.points += bonus; this.db.points.push({ id: 'pe-' + uid(), userId: share.to, rule: 'shared_trip_bonus', points: bonus, refType: 'share', refId: share.id, at: iso() }); }
               }
             } else if (spent >= SHARED_TRIP_BONUS.dailyCap) result.reasons.push('Daily shared-trip bonus cap reached.');
-          } else result.reasons.push('No shared-trip bonus: both of you need to opt in before arrival.');
+            if (!bonusM) result.reasons.push('No shared-trip bonus: no live progress was recorded along the route.');
+          } else result.reasons.push('No shared-trip bonus: your friend must accept and both of you must opt in before arrival.');
         }
         result.bonusPoints = bonus; result.eligibleM = bonusM;
         this.db.trips.push({ id: tripId, userId: me.id, shareId: share?.id, distanceM: Math.round(routeM), bonusM: Math.round(bonusM), bonusPoints: bonus, at: iso() });
       }
     }
-    if (share) { share.trip.arrived = true; share.trip.bonusPoints = result.bonusPoints; this._endShare(share, 'arrived'); }
+    if (share) {
+      const atDest = p.position && haversine([p.position.lat, p.position.lng], [p.destLat, p.destLng]) <= TRIP_LIMITS.arrivalRadiusM;
+      share.trip.bonusPoints = result.bonusPoints;
+      if (share.status !== 'ended') { share.trip.arrived = !!atDest; this._endShare(share, atDest ? 'arrived' : 'stopped'); }
+    }
     this.save();
     return result;
   },
@@ -288,13 +349,14 @@ export const socialMethods = {
     const geometry = r.geometry.map(([a, b]) => [a, b]);
     let dist = 0; for (let i = 1; i < geometry.length; i++) dist += haversine(geometry[i - 1], geometry[i]);
     for (const s of this.db.shares) if (s.status !== 'ended' && s.from === friend.id && s.to === me.id) this._endShare(s, 'replaced');
-    const share = { id: 'sh-' + uid(), from: friend.id, to: me.id, type: 'trip', startedAt: iso(), endsAt: new Date(now() + 20 * 60000).toISOString(), status: 'active', sample: true,
-      trip: { destName: 'Coventry Cathedral', destLat: geometry.at(-1)[0], destLng: geometry.at(-1)[1], geometry, routeDistanceM: dist, durationS: dist / 1.35, progressM: 0, arrived: false, rewardOptIn: { [friend.id]: true } } };
+    const share = { id: 'sh-' + uid(), from: friend.id, to: me.id, type: 'trip', startedAt: iso(), endsAt: new Date(now() + 20 * 60000).toISOString(), status: 'invited', live: true, sample: true, route: geometry,
+      trip: { destName: 'Coventry Cathedral', destLat: geometry.at(-1)[0], destLng: geometry.at(-1)[1], mode: 'walk', routeDistanceM: Math.round(dist), durationS: Math.round(dist / 1.35), progressM: 0, arrived: false, rewardOptIn: { [friend.id]: true } } };
     this.db.shares.push(share);
     let i = 0;
     const tick = () => {
       const live = this.db.shares.find((s) => s.id === share.id);
       if (!live || live.status === 'ended') return;
+      if (live.status === 'invited') { setTimeout(tick, 1500); return; } // scripted movement starts only after you accept
       if (i >= geometry.length) {
         live.trip.arrived = true; live.trip.progressM = dist; this._endShare(live, 'arrived'); this.save(); return;
       }
