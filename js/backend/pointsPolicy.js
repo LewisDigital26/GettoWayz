@@ -25,6 +25,7 @@ export const RULES = {
   trip_completed:       { label: 'Completed a verified trip', group: 'Trips', points: 4, dailyCap: 16 },      // 4 rewarded trips/day
   trip_distance:        { label: 'Distance bonus for a verified trip', group: 'Trips', points: null, dailyCap: 30 }, // points from TRIP.bands
   reversal:             { label: 'Points reversed by a moderator', group: 'Adjustments', points: null },
+  manual_adjustment:    { label: 'Points adjusted by a moderator', group: 'Adjustments', points: null },
   // retired — kept for history only
   alert_confirmed:      { label: 'Your report was confirmed by others (retired rule)', group: 'Retired', points: 0, retired: true },
   shared_trip_bonus:    { label: 'Shared-trip bonus (retired rule)', group: 'Retired', points: 0, retired: true },
