@@ -15,6 +15,7 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
+  <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.css" crossorigin="anonymous" />
   <link rel="stylesheet" href="css/app.css" />
   <script>try{var d=document.documentElement,c=localStorage.getItem("gw:colourway");if(c)d.setAttribute("data-colourway",c);var p=JSON.parse(localStorage.getItem("gw:prefs")||"{}");if(p.largeText)d.classList.add("large-text");if(p.reduceMotion)d.classList.add("reduce-motion");var h=location.hash.replace(/^#\/?/,"");d.dataset.tab=["leaderboard","friends","activity","profile"].indexOf(h)>-1?h:"map";}catch(e){}</script>
 </head>
@@ -84,6 +85,14 @@
       <label><input type="checkbox" id="layerAlerts" checked /> Community alerts</label>
       <label><input type="checkbox" id="layerPaths" checked /> Community-added paths</label>
       <label><input type="checkbox" id="layerPending" /> My pending suggestions</label>
+      <label id="layerTrafficRow" hidden><input type="checkbox" id="layerTraffic" /> 🚦 Live traffic</label>
+      <div class="legend" id="trafficLegend" hidden>
+        <span><i class="flow-dot free"></i> Free-flowing</span>
+        <span><i class="flow-dot slow"></i> Slow</span>
+        <span><i class="flow-dot jam"></i> Jammed / closed</span>
+        <span>⛔ 🚧 💥 Incidents — tap for details</span>
+      </div>
+      <div class="small muted" id="trafficNote" style="padding:4px 10px 2px" hidden></div>
       <div class="popover-sep"></div>
       <div class="popover-title">🔦 Streetlights <span id="nightBadge" class="chip" hidden></span></div>
       <div class="segmented" id="lightsMode" role="radiogroup" aria-label="Streetlight layer">
@@ -117,7 +126,7 @@
 
     <!-- BOTTOM SHEET -->
     <section id="sheet" class="sheet" aria-live="polite">
-      <div class="sheet-handle" id="sheetHandle" role="button" tabindex="0" aria-controls="sheetContent" aria-expanded="true" aria-label="Minimise panel"><span></span></div>
+      <div class="sheet-handle" id="sheetHandle"><span></span></div>
       <div id="sheetContent" class="sheet-content"></div>
     </section>
 
@@ -179,6 +188,8 @@
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
+  <script src="https://unpkg.com/maplibre-gl@6.15.0/dist/maplibre-gl.js" crossorigin="anonymous" onerror="void 0"></script>
+  <script src="https://unpkg.com/@maplibre/maplibre-gl-leaflet@0.1.4/leaflet-maplibre-gl.js" crossorigin="anonymous" onerror="void 0"></script>
   <script src="config.local.js" onerror="void 0"></script>
   <script>if (window.GW_CONFIG && window.GW_CONFIG.BACKEND === "supabase" && window.GW_CONFIG.SUPABASE_URL) document.write('<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"><\/script>');</script>
   <script type="module" src="js/app.js"></script>
