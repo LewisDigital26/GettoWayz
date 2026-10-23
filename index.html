@@ -16,11 +16,14 @@
   <link href="https://fonts.googleapis.com/css2?family=Syne:wght@600;700;800&family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css" crossorigin="anonymous" referrerpolicy="no-referrer" />
   <link rel="stylesheet" href="css/app.css" />
-  <script>try{var c=localStorage.getItem("gw:colourway");if(c)document.documentElement.setAttribute("data-colourway",c);}catch(e){}</script>
+  <script>try{var d=document.documentElement,c=localStorage.getItem("gw:colourway");if(c)d.setAttribute("data-colourway",c);var p=JSON.parse(localStorage.getItem("gw:prefs")||"{}");if(p.largeText)d.classList.add("large-text");if(p.reduceMotion)d.classList.add("reduce-motion");var h=location.hash.replace(/^#\/?/,"");d.dataset.tab=["leaderboard","friends","activity","profile"].indexOf(h)>-1?h:"map";}catch(e){}</script>
 </head>
 <body>
+  <a class="skip-link" href="#tabbar">Skip to main navigation</a>
   <div id="app" class="app">
 
+   <!-- MAP TAB (always mounted, so routes and search survive tab switches) -->
+   <div id="mapView" class="map-view">
     <!-- MAP -->
     <div id="map" class="map" role="application" aria-label="Map"></div>
 
@@ -35,9 +38,6 @@
         <input id="searchInput" type="search" placeholder="Where to?" autocomplete="off" enterkeyhint="search" aria-label="Search destination" />
         <button id="searchClear" class="searchbox-clear" aria-label="Clear search" hidden>×</button>
       </div>
-      <button class="iconbtn" id="profileBtn" aria-label="Account">
-        <span id="profileAvatar" class="avatar">G</span>
-      </button>
     </header>
 
     <!-- SEARCH RESULTS -->
@@ -55,7 +55,7 @@
     <div class="mapctl">
       <button class="iconbtn" id="zoomIn" aria-label="Zoom in">+</button>
       <button class="iconbtn" id="zoomOut" aria-label="Zoom out">−</button>
-      <button class="iconbtn" id="layersBtn" aria-label="Map layers">
+      <button class="iconbtn" id="layersBtn" aria-label="Map layers and legend" aria-expanded="false" aria-controls="layersPanel">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Zm-8 9.6L2 13.6l10 5 10-5-2-1-8 4-8-4Zm0 4L2 17.6l10 5 10-5-2-1-8 4-8-4Z"/></svg>
       </button>
       <button class="iconbtn accent" id="locateBtn" aria-label="My location">
@@ -68,10 +68,6 @@
 
     <!-- CONTRIBUTE FABS -->
     <div class="fabs" id="fabs">
-      <button class="fab" id="friendsBtn">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm-8 0a3 3 0 1 0 0-6 3 3 0 0 0 0 6Zm0 2c-2.3 0-7 1.2-7 3.5V19h14v-2.5C15 14.2 10.3 13 8 13Zm8 0c-.3 0-.6 0-1 .1 1.2.8 2 2 2 3.4V19h6v-2.5c0-2.3-4.7-3.5-7-3.5Z"/></svg>
-        <span>Friends</span>
-      </button>
       <button class="fab" id="reportBtn">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M1 21h22L12 2 1 21Zm12-3h-2v-2h2v2Zm0-4h-2v-4h2v4Z"/></svg>
         <span>Report</span>
@@ -83,7 +79,8 @@
     </div>
 
     <!-- LAYERS PANEL -->
-    <div id="layersPanel" class="popover" hidden>
+    <div id="layersPanel" class="popover" role="dialog" aria-label="Map layers and legend" hidden>
+      <div class="popover-title">Show on map</div>
       <label><input type="checkbox" id="layerAlerts" checked /> Community alerts</label>
       <label><input type="checkbox" id="layerPaths" checked /> Community-added paths</label>
       <label><input type="checkbox" id="layerPending" /> My pending suggestions</label>
@@ -100,6 +97,22 @@
         <span><i class="lamp-dot out"></i> Reported out</span>
         <span><i class="lamp-dot unknown"></i> Unknown</span>
       </div>
+      <div class="popover-sep"></div>
+      <details class="map-legend" id="mapLegend">
+        <summary class="popover-title">Map legend</summary>
+        <div class="legend">
+          <span><i class="lg-line" style="--c:var(--route-walk)"></i> Selected route (colour = travel mode)</span>
+          <span><i class="lg-line" style="--c:var(--route-alt)"></i> Other route options</span>
+          <span><i class="lg-line dotted" style="--c:var(--verified)"></i> Community path · approved by a moderator</span>
+          <span><i class="lg-line dashed" style="--c:var(--pending)"></i> Path suggestion · awaiting review</span>
+          <span><i class="lg-pin" style="--c:var(--verified)">⚠️</i> Alert · verified by a moderator</span>
+          <span><i class="lg-pin" style="--c:var(--pending)">⚠️</i> Alert · awaiting confirmation</span>
+          <span><i class="lg-dot" style="--c:var(--teal)"></i> You (only on this device)</span>
+          <span><i class="lg-dot" style="--c:var(--friend)"></i> A friend who chose to share with you</span>
+          <span><i class="lg-line" style="--c:#ffd34d"></i> Route stretch with lamps confirmed working</span>
+        </div>
+        <p class="small muted legend-note">Labels describe what the map knows. They are not safety ratings — always use your own judgement.</p>
+      </details>
     </div>
 
     <!-- BOTTOM SHEET -->
@@ -126,20 +139,6 @@
       </div>
     </div>
 
-    <!-- MODAL / FULL SCREEN VIEWS -->
-    <div id="modal" class="modal" hidden>
-      <div class="modal-card" role="dialog" aria-modal="true">
-        <div class="modal-head">
-          <h2 id="modalTitle"></h2>
-          <button class="iconbtn" id="modalClose" aria-label="Close">×</button>
-        </div>
-        <div id="modalBody" class="modal-body"></div>
-      </div>
-    </div>
-
-    <!-- TOASTS -->
-    <div id="toasts" class="toasts" aria-live="polite"></div>
-
     <!-- DRAW HUD (path suggestion) -->
     <div id="drawHud" class="drawhud" hidden>
       <div class="drawhud-text">
@@ -155,6 +154,28 @@
 
     <!-- OFFLINE/STATUS STRIP -->
     <div id="statusStrip" class="status-strip" hidden></div>
+   </div>
+
+   <!-- OTHER TABS (Leaderboard, Friends, Activity, Profile) are pages laid over the map -->
+   <main id="pages" class="pages" aria-live="off"></main>
+
+   <!-- PRIMARY NAVIGATION: bottom bar on phones, side rail on wide screens -->
+   <nav id="tabbar" class="tabbar" aria-label="Main" tabindex="-1"></nav>
+
+    <!-- MODAL / FULL SCREEN VIEWS -->
+    <div id="modal" class="modal" hidden>
+      <div class="modal-card" role="dialog" aria-modal="true">
+        <div class="modal-head">
+          <h2 id="modalTitle"></h2>
+          <button class="iconbtn" id="modalClose" aria-label="Close">×</button>
+        </div>
+        <div id="modalBody" class="modal-body"></div>
+      </div>
+    </div>
+
+    <!-- TOASTS -->
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+
   </div>
 
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js" crossorigin="anonymous" referrerpolicy="no-referrer"></script>
