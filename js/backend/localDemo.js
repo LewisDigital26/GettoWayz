@@ -4,7 +4,8 @@
 
 import { BackendError, haversine, uid, lineLength } from '../util.js';
 import { buildSeed, SEED_VERSION } from './seed.js';
-import { ALERT_CATEGORIES, POINTS, RATE_LIMITS, levelFor, CONFIRMATIONS_TO_AUTO_FLAG } from './rules.js';
+import { ALERT_CATEGORIES, RATE_LIMITS, CONFIRMATIONS_TO_AUTO_FLAG } from './rules.js';
+import { pointsMethods, ALERT_AWARD_RULE } from './demoPoints.js';
 import { socialMethods, makeGwId } from './social.js';
 
 const KEY = 'ghetto-wayz:demo-db:v2';
@@ -71,7 +72,7 @@ export class LocalDemoBackend {
     if (!/^[a-z0-9_.-]{3,20}$/i.test(alias)) throw new BackendError('invalid', 'Alias must be 3–20 letters, numbers, _ . or -');
     if (!/^\d{4}$/.test(pin)) throw new BackendError('invalid', 'PIN must be 4 digits.');
     if (this.db.users.some((u) => u.alias.toLowerCase() === alias.toLowerCase())) throw new BackendError('taken', 'That alias is taken.');
-    const user = { id: 'u-' + uid(), alias, role: 'user', points: 0, leaderboardOptIn: false, createdAt: new Date().toISOString(), pinHash: await hashPin(pin), gwId: makeGwId(), requestSetting: 'anyone' };
+    const user = { id: 'u-' + uid(), alias, role: 'user', points: 0, levelFloor: 1, leaderboardOptIn: false, friendsBoardOptIn: false, tripPoints: true, createdAt: new Date().toISOString(), pinHash: await hashPin(pin), gwId: makeGwId(), requestSetting: 'anyone' };
     this.db.users.push(user);
     this.db.session = user.id;
     this.save();
@@ -98,10 +99,7 @@ export class LocalDemoBackend {
   }
   async updateUser(patch) {
     const u = this.db.users.find((x) => x.id === this.requireUser().id);
-    const allowed = ['leaderboardOptIn'];
-    for (const k of allowed) if (k in patch) u[k] = patch[k];
-    this.save();
-    return this.publicUser(u);
+    return this.setPointsPrefs({ leaderboardOptIn: patch.leaderboardOptIn, friendsBoardOptIn: patch.friendsBoardOptIn, tripPoints: patch.tripPoints });
   }
 
   // ---------- alerts ----------
@@ -120,7 +118,7 @@ export class LocalDemoBackend {
     const mine = this.db.alerts.filter((a) => a.createdBy === user.id);
     if (mine.filter((a) => sameDay(a.createdAt)).length >= RATE_LIMITS.alertsPerDay)
       throw new BackendError('rate', `Limit reached: ${RATE_LIMITS.alertsPerDay} reports per day. Quality beats volume.`);
-        if (mine.some((a) => a.status === 'pending' && a.category === category && haversine([lat, lng], [a.lat, a.lng]) < RATE_LIMITS.minMetresBetweenOwnAlerts))
+    if (mine.some((a) => a.status === 'pending' && a.category === category && haversine([lat, lng], [a.lat, a.lng]) < RATE_LIMITS.minMetresBetweenOwnAlerts))
       throw new BackendError('dupe', 'You already have a pending report at this spot.');
     const alert = {
       id: 'a-' + uid(), category, lat: +lat.toFixed(5), lng: +lng.toFixed(5), note, status: 'pending',
@@ -140,8 +138,7 @@ export class LocalDemoBackend {
     if (a.confirmations.includes(user.id)) throw new BackendError('dupe', 'Already confirmed.');
     const todays = this.db.alerts.reduce((n, x) => n + (x.confirmations.includes(user.id) && sameDay(x.createdAt) ? 1 : 0), 0);
     if (todays >= RATE_LIMITS.confirmationsPerDay) throw new BackendError('rate', 'Confirmation limit reached for today.');
-    a.confirmations.push(user.id);
-    if (a.confirmations.length === CONFIRMATIONS_TO_AUTO_FLAG) this.grant(a.createdBy, 'alert_confirmed', 'alert', a.id);
+    a.confirmations.push(user.id); // no points here — confirmations only count if a moderator verifies the report
     this.save();
     return a;
   }
@@ -153,11 +150,12 @@ export class LocalDemoBackend {
       if (a.status !== 'verified') {
         a.status = 'verified';
         a.reviewedAt = new Date().toISOString();
-        this.grant(a.createdBy, 'alert_verified', 'alert', a.id);
-        for (const uid_ of a.confirmations) this.grant(uid_, 'confirm_helpful', 'alert', a.id);
+        this.award(a.createdBy, ALERT_AWARD_RULE(a.category), 'alert', a.id);
+        for (const uid_ of a.confirmations) this.award(uid_, 'confirm_helpful', 'alert', a.id);
       }
     } else if (decision === 'reject') a.status = 'rejected';
     else if (decision === 'resolve') a.status = 'resolved';
+    this._ensurePoints(); this._logAdmin('alert_' + decision, a.createdBy, 'alert:' + a.id);
     this.save();
     return a;
   }
@@ -193,36 +191,18 @@ export class LocalDemoBackend {
     const p = this.db.paths.find((x) => x.id === id);
     if (!p) throw new BackendError('missing', 'Path not found.');
     if (decision === 'approve') {
-      if (p.status !== 'approved') this.grant(p.createdBy, 'path_approved', 'path', p.id);
+      if (p.status !== 'approved') this.award(p.createdBy, 'path_approved', 'path', p.id);
       p.status = 'approved';
     } else if (decision === 'reject') p.status = 'rejected';
     else if (decision === 'changes') p.status = 'changes';
     p.reviewedAt = new Date().toISOString();
     p.reviewMessage = (message || '').trim().slice(0, 300);
+    this._ensurePoints(); this._logAdmin('path_' + decision, p.createdBy, 'path:' + p.id, message);
     this.save();
     return p;
   }
 
-  // ---------- points ----------
-  grant(userId, rule, refType, refId) {
-    const u = this.db.users.find((x) => x.id === userId);
-    if (!u) return;
-    if (this.db.points.some((e) => e.userId === userId && e.rule === rule && e.refId === refId)) return; // never double-grant
-    const pts = POINTS[rule] || 0;
-    u.points += pts;
-    this.db.points.push({ id: 'pe-' + uid(), userId, rule, points: pts, refType, refId, at: new Date().toISOString() });
-  }
-  async pointHistory(userId) {
-    return this.db.points.filter((e) => e.userId === userId).sort((a, b) => new Date(b.at) - new Date(a.at));
-  }
-  async leaderboard() {
-    const me = this.currentUser();
-    return this.db.users
-      .filter((u) => u.leaderboardOptIn && u.role !== 'admin')
-      .sort((a, b) => b.points - a.points)
-      .slice(0, 25)
-      .map((u) => ({ alias: u.alias, points: u.points, level: levelFor(u.points).level.name, isMe: me?.id === u.id, sample: !!u.sample }));
-  }
+  // ---------- points: see demoPoints.js ----------
   async myStats() {
     const me = this.currentUser();
     if (!me) return null;
@@ -235,4 +215,4 @@ export class LocalDemoBackend {
   }
   aliasOf(userId) { return this.db.users.find((u) => u.id === userId)?.alias || 'member'; }
 }
-Object.assign(LocalDemoBackend.prototype, socialMethods);
+Object.assign(LocalDemoBackend.prototype, socialMethods, pointsMethods);
