@@ -10,16 +10,18 @@ const wrap = (e) => new BackendError(e.code || 'db', (e.message || 'Request fail
 export class SupabaseBackend {
   constructor({ url, anonKey }) {
     if (!window.supabase) throw new Error('supabase-js is not loaded');
-        // No cross-tab auth lock: the default Web Lock lets one stuck tab freeze every other tab on the site.
-        this.sb = supabase.createClient(url, anonKey, { auth: { lock: (_name, _timeout, fn) => fn() } });
+    // No cross-tab auth lock: supabase-js's default Web Lock means one stuck tab freezes every other tab
+    // on the site. Token refresh races across tabs are harmless for this app (last writer wins).
+    this.sb = supabase.createClient(url, anonKey, { auth: { lock: (_name, _timeout, fn) => fn() } });
     this.kind = 'supabase';
     this.isShared = true;
     this.authMode = 'email';
     this.listeners = new Set();
     this.profile = null;
     this.ready = this.sb.auth.getSession().then(({ data }) => this.loadProfile(data.session?.user?.id));
-        // Defer: supabase-js holds an internal lock while firing this callback; awaiting a query inside it deadlocks.
-        this.sb.auth.onAuthStateChange((_evt, session) => { setTimeout(() => this.loadProfile(session?.user?.id).then(() => this.emit()), 0); });
+    // Defer: supabase-js holds an internal lock while firing this callback, and awaiting another
+    // supabase call inside it deadlocks (documented in the supabase-js auth docs).
+    this.sb.auth.onAuthStateChange((_evt, session) => { setTimeout(() => this.loadProfile(session?.user?.id).then(() => this.emit()), 0); });
   }
   emit() { for (const cb of this.listeners) cb(); }
   onChange(cb) { this.listeners.add(cb); return () => this.listeners.delete(cb); }
@@ -27,7 +29,8 @@ export class SupabaseBackend {
   async loadProfile(userId) {
     if (!userId) { this.profile = null; return; }
     const { data } = await this.sb.from('profiles').select('*').eq('id', userId).maybeSingle();
-    this.profile = data ? { id: data.id, alias: data.alias, role: data.role, points: data.points, leaderboardOptIn: data.leaderboard_opt_in, gwId: data.gw_id, requestSetting: data.request_setting, createdAt: data.created_at } : null;
+    this.profile = data ? { id: data.id, alias: data.alias, role: data.role, points: data.points, levelFloor: data.level_floor ?? 1, leaderboardOptIn: data.leaderboard_opt_in,
+      friendsBoardOptIn: !!data.friends_board_opt_in, tripPoints: data.trip_points !== false, gwId: data.gw_id, requestSetting: data.request_setting, createdAt: data.created_at } : null;
   }
   async rpc(fn, args) {
     const { data, error } = await this.sb.rpc(fn, args);
@@ -58,8 +61,9 @@ export class SupabaseBackend {
     for (const s of await this.listShares().catch(() => [])) if (s.direction === 'outgoing' && s.status !== 'ended') await this.stopShare(s.id).catch(() => {});
     await this.sb.auth.signOut(); this.profile = null; this.emit();
   }
-  async updateUser(patch) {
-    await this.rpc('set_my_prefs', { p_opt_in: patch.leaderboardOptIn ?? null, p_request_setting: null });
+  async updateUser(patch) { return this.setPointsPrefs(patch); }
+  async setPointsPrefs({ leaderboardOptIn, friendsBoardOptIn, tripPoints } = {}) {
+    await this.rpc('set_points_prefs', { p_public: leaderboardOptIn ?? null, p_friends: friendsBoardOptIn ?? null, p_trip_points: tripPoints ?? null });
     await this.loadProfile(this.requireUser().id); this.emit(); return this.profile;
   }
 
@@ -88,17 +92,68 @@ export class SupabaseBackend {
   async suggestPath({ name, type, surface, note, points }) { const p = await this.rpc('suggest_path', { p_name: name, p_type: type, p_surface: surface, p_note: note, p_points: points.map(([a, b]) => [+a.toFixed(5), +b.toFixed(5)]) }); this.emit(); return this.rowToPath(p); }
   async reviewPath(id, decision, message = '') { await this.rpc('review_path', { p_path: id, p_decision: decision, p_message: message }); this.emit(); }
 
-  // ---------- points ----------
-  async pointHistory(userId) {
-    const { data, error } = await this.sb.from('point_entries').select('*').eq('user_id', userId).order('at', { ascending: false });
+  // ---------- points (all awards are calculated server-side; see migration-004-points.sql) ----------
+  rowToEntry(e) { return { id: e.id, userId: e.user_id, rule: e.rule, points: e.points, refType: e.ref_type, refId: e.ref_id, at: e.at, status: e.status || 'awarded', reason: e.reason, reversalOf: e.reversal_of, pointsRequested: e.points_requested }; }
+  async pointHistory() { return (await this.myLedger({ limit: 50 })).entries; }
+  async myLedger({ offset = 0, limit = 20 } = {}) {
+    const me = this.requireUser();
+    const o = Math.max(0, Math.min(500, offset | 0)), l = Math.max(1, Math.min(50, limit | 0));
+    const { data, error, count } = await this.sb.from('point_entries').select('*', { count: 'exact' }).eq('user_id', me.id).order('at', { ascending: false }).range(o, o + l - 1);
     if (error) throw wrap(error);
-    return (data || []).map((e) => ({ id: e.id, userId: e.user_id, rule: e.rule, points: e.points, refType: e.ref_type, refId: e.ref_id, at: e.at }));
+    return { entries: (data || []).map((e) => this.rowToEntry(e)), total: count ?? (data || []).length };
+  }
+  async myPointsSummary() {
+    const me = this.requireUser();
+    await this.loadProfile(me.id);
+    const { weekStart } = await import('./pointsPolicy.js');
+    const { data } = await this.sb.from('point_entries').select('points').eq('user_id', me.id).eq('status', 'awarded').gte('at', weekStart().toISOString());
+    const p = this.profile;
+    return { points: p.points, levelFloor: p.levelFloor, week: (data || []).reduce((n, e) => n + e.points, 0), leaderboardOptIn: p.leaderboardOptIn, friendsBoardOptIn: p.friendsBoardOptIn, tripPoints: p.tripPoints };
+  }
+  async myContributions() { return (await this.rpc('my_contributions', { p_limit: 30 })) || []; }
+  async myTrips() {
+    const me = this.requireUser();
+    const { data, error } = await this.sb.from('trip_sessions').select('id,mode,status,started_at,eligible_m,base_points,distance_points,reasons').eq('user_id', me.id).neq('status', 'active').order('started_at', { ascending: false }).limit(20);
+    if (error) throw wrap(error);
+    return (data || []).map((t) => ({ id: t.id, mode: t.mode, status: t.status, startedAt: t.started_at, eligibleM: t.eligible_m, basePoints: t.base_points, distancePoints: t.distance_points, reasons: t.reasons || [] }));
+  }
+  async pointsPolicy() {
+    const [{ data: rules }, { data: settings }] = await Promise.all([this.sb.from('point_rules').select('*'), this.sb.from('points_settings').select('*').eq('id', 1).maybeSingle()]);
+    const local = await import('./pointsPolicy.js');
+    if (!rules?.length || !settings) return { rules: local.RULES, trip: local.TRIP, levels: local.LEVELS, source: 'local' };
+    const map = Object.fromEntries(rules.map((r) => [r.key, { label: r.label, group: r.grp, points: r.points, dailyCap: r.daily_cap, retired: r.retired }]));
+    const c = settings.level_curve || {};
+    const levels = local.LEVEL_NAMES.slice(0, c.levels || 10).map((name, i) => ({ n: i + 1, name, min: i === 0 ? 0 : Math.round(((c.base ?? 25) * Math.pow(i, c.exponent ?? 1.75)) / 5) * 5 }));
+    return { rules: map, trip: settings.trip, levels, source: 'server' };
+  }
+  // trips
+  async startTrip(mode, geometry) { return this.rpc('start_trip', { p_mode: mode, p_geometry: geometry.map(([a, b]) => [+a.toFixed(6), +b.toFixed(6)]) }); }
+  async tripCheckpoint(id, pos) { if (pos) await this.rpc('trip_checkpoint', { p_trip: id, p_lat: pos.lat, p_lng: pos.lng }); }
+  async finishTrip(id, pos) { const r = await this.rpc('finish_trip', { p_trip: id, p_lat: pos?.lat ?? null, p_lng: pos?.lng ?? null }); await this.loadProfile(this.profile?.id); this.emit(); return r; }
+  async abandonTrip(id) { await this.rpc('abandon_trip', { p_trip: id }); }
+  // leaderboards
+  async leaderboardPage({ scope = 'public', period = 'week', offset = 0, limit = 20 } = {}) {
+    const map = (r) => ({ rank: Number(r.rank), alias: r.alias, level: r.level, points: Number(r.points), isMe: r.is_me, total: Number(r.total) });
+    const [rows, mine] = await Promise.all([
+      this.rpc('leaderboard_page', { p_scope: scope, p_period: period, p_offset: offset, p_limit: limit }),
+      this.profile ? this.rpc('leaderboard_me', { p_scope: scope, p_period: period }) : Promise.resolve([]),
+    ]);
+    const list = (rows || []).map(map);
+    return { rows: list, total: list[0]?.total ?? (mine?.[0] ? Number(mine[0].total) : 0), me: mine?.[0] ? map(mine[0]) : null };
   }
   async leaderboard() {
-    const rows = await this.rpc('leaderboard', {});
-    const { levelFor } = await import('./rules.js');
-    return rows.map((r) => ({ alias: r.alias, points: r.points, level: levelFor(r.points).level.name, isMe: r.is_me }));
+    const { LEVELS } = await import('./pointsPolicy.js');
+    return (await this.leaderboardPage({ scope: 'public', period: 'all', limit: 25 })).rows.map((r) => ({ ...r, level: LEVELS[r.level - 1]?.name }));
   }
+  // moderator tools (the server rejects these for non-moderators)
+  async adminUserPoints(alias) {
+    const r = await this.rpc('admin_user_points', { p_alias: alias });
+    return r ? { ...r, entries: (r.entries || []).map((e) => ({ ...e, status: e.status || 'awarded' })) } : null;
+  }
+  async adminReverseAward(entryId, reason) { const n = await this.rpc('admin_reverse_award', { p_entry: entryId, p_reason: reason }); this.emit(); return n; }
+  async adminReverseSource(refType, refId, reason) { const n = await this.rpc('admin_reverse_source', { p_ref_type: refType, p_ref_id: refId, p_reason: reason }); this.emit(); return n; }
+  async adminTripsForReview() { return (await this.rpc('admin_trips_for_review', {})) || []; }
+  async adminReviewTrip(id, decision, reason = '') { return this.rpc('admin_review_trip', { p_trip: id, p_decision: decision, p_reason: reason }); }
   async myStats() {
     const me = this.requireUser(); const today = new Date().toISOString().slice(0, 10);
     const [{ data: a }, { data: p }] = await Promise.all([this.sb.from('alerts').select('id,created_at').eq('created_by', me.id), this.sb.from('paths').select('id,created_at').eq('created_by', me.id)]);
@@ -171,10 +226,10 @@ export class SupabaseBackend {
     return views;
   }
   async startLocationShare(friendId, minutes) { const s = await this.rpc('start_share', { p_to: friendId, p_minutes: minutes, p_type: 'location', p_trip: null }); this.emit(); return this.shareView(s); }
-  async startTripShare(friendId, { destName, mode, geometry, durationS, rewardOptIn, live = false, toFriendLocation = false }) {
+  async startTripShare(friendId, { destName, mode, geometry, durationS, live = false, toFriendLocation = false }) {
     this.requireUser();
     const g = geometry.map(([a, b]) => [+a.toFixed(6), +b.toFixed(6)]);
-    const s = await this.rpc('start_trip_share', { p_to: friendId, p_trip: { destName, mode, durationS, rewardOptIn: !!rewardOptIn, toFriendLocation: !!toFriendLocation }, p_geometry: g, p_live: !!live });
+    const s = await this.rpc('start_trip_share', { p_to: friendId, p_trip: { destName, mode, durationS, toFriendLocation: !!toFriendLocation }, p_geometry: g, p_live: !!live });
     (this.routeCache ||= new Map()).set(s.id, g);
     this.emit(); return this.shareView(s);
   }
@@ -184,12 +239,6 @@ export class SupabaseBackend {
   async resumeShare(id) { await this.rpc('set_share_status', { p_share: id, p_status: 'active', p_reason: null }); this.emit(); }
   async stopShare(id, reason = 'stopped') { await this.rpc('set_share_status', { p_share: id, p_status: 'ended', p_reason: reason }); this.emit(); }
   async updateSharePosition(id, { lat, lng }) { await this.rpc('update_share_position', { p_share: id, p_lat: lat, p_lng: lng }); }
-  async optInTripReward(id) { await this.rpc('opt_in_trip_reward', { p_share: id }); this.emit(); }
-  async tripCheckIn({ shareId, routeDistanceM, destLat, destLng, position }) {
-    const res = await this.rpc('trip_check_in', { p_share: shareId || null, p_route_m: routeDistanceM, p_dest_lat: destLat, p_dest_lng: destLng, p_lat: position?.lat ?? null, p_lng: position?.lng ?? null });
-    await this.loadProfile(this.profile.id); this.emit();
-    return res;
-  }
   async listReports() { const { data, error } = await this.sb.from('reports').select('*'); if (error) throw wrap(error); return data; }
 }
 
