@@ -1,6 +1,6 @@
 /* Ghetto Wayz service worker — caches the app shell for offline launch.
    Map tiles, routing and search are network-only (never cached as "live"). */
-const CACHE = 'gw-shell-v11';
+const CACHE = 'gw-shell-v12';
 const SHELL = [
   './', './index.html', './css/app.css', './manifest.webmanifest', './icons/icon.svg',
   './js/app.js', './js/config.js', './js/util.js', './js/map.js', './js/state.js',
