@@ -102,7 +102,7 @@ export async function openAdmin(ctx, opts = {}) {
     el('p', { class: 'muted small' }, 'Trips that looked too fast for their travel mode. No locations are stored — only the summary below. Approve only if it looks plausible.'),
     trips.length ? el('div', { class: 'list' }, ...trips.map(tripCard)) : el('div', { class: 'empty' }, 'No trips to check.'),
     el('h3', { id: 'adminGrant', style: 'font-size:15px;margin:16px 0 6px' }, 'Add or remove points'),
-    el('p', { class: 'muted small' }, 'For testing, or to fix a mistake. Up to 1000 at a time. Each change is logged, shows in that user’s points history with your reason, and can be reversed below. Moderator accounts never appear on leaderboards.'),
+    el('p', { class: 'muted small' }, 'For testing, or to fix a mistake. Up to 1000 at a time. Each change is logged, shows in that user’s points history with your reason, and can be reversed below. Moderators appear on leaderboards like anyone else once they opt in.'),
     grantForm,
     el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, 'Points lookup & reversals'),
     el('p', { class: 'muted small' }, 'Reverse an award that turned out to be fraudulent or mistaken. The original entry is kept and marked reversed; the user sees the reversal and your reason. Users keep their highest level.'),
