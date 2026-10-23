@@ -4,6 +4,7 @@
 //   name: string;              // 'local-demo' | 'websocket' | 'supabase-realtime' | ...
 //   isCrossDevice: boolean;    // false for the demo — updates never leave this browser
 //   onUpdate(cb): () => void;  // called whenever any share session the signed-in user can see changes
+//   onAlerts(cb): () => void;  // called whenever a community alert is created, confirmed or reviewed
 //   note: string;              // plain-language limitation shown to users
 // }
 //
@@ -22,6 +23,7 @@ export class LocalDemoRealtime {
     setInterval(() => this.cbs.forEach((cb) => cb()), 10000); // expiry + staleness ticks
   }
   onUpdate(cb) { this.cbs.add(cb); return () => this.cbs.delete(cb); }
+  onAlerts(cb) { return this.backend.onChange(cb); }   // demo: same-browser changes only
 }
 
 export async function createRealtime(backend) {
