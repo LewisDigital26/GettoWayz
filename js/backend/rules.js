@@ -1,29 +1,11 @@
-// Points, levels, rate limits and alert categories — shown to users verbatim in the "Points rules" screen.
-// Points are only ever granted when a moderator approves/verifies a contribution (never on submission).
-
-export const POINT_RULES = [
-  { key: 'path_approved', label: 'Missing path approved by a moderator', points: 50 },
-  { key: 'alert_verified', label: 'Alert verified by a moderator', points: 10 },
-  { key: 'alert_confirmed', label: 'Your alert confirmed by 2+ other users', points: 5 },
-  { key: 'confirm_helpful', label: 'You confirmed an alert that was later verified', points: 2 },
-];
-export const POINTS = Object.fromEntries(POINT_RULES.map((r) => [r.key, r.points]));
-
-export const LEVELS = [
-  { name: 'Newcomer', min: 0 },
-  { name: 'Scout', min: 50 },
-  { name: 'Pathfinder', min: 150 },
-  { name: 'Wayfinder', min: 400 },
-  { name: 'Legend', min: 1000 },
-];
-export function levelFor(points) {
-  let lvl = LEVELS[0], next = LEVELS[1] || null;
-  for (let i = 0; i < LEVELS.length; i++) {
-    if (points >= LEVELS[i].min) { lvl = LEVELS[i]; next = LEVELS[i + 1] || null; }
-  }
-  const progress = next ? (points - lvl.min) / (next.min - lvl.min) : 1;
-  return { level: lvl, next, progress: Math.max(0, Math.min(1, progress)) };
-}
+// Rate limits, alert categories and other shared constants.
+// Point values, caps, trip rewards, levels and leaderboard periods live in ./pointsPolicy.js (one place).
+import { RULES, LEVELS, levelInfo, TRIP } from './pointsPolicy.js';
+export { RULES as POINT_RULE_MAP, LEVELS, levelInfo };
+export const POINT_RULES = Object.entries(RULES).filter(([, r]) => !r.retired && r.points != null).map(([key, r]) => ({ key, label: r.label, points: r.points }));
+export const POINTS = Object.fromEntries(Object.entries(RULES).map(([k, r]) => [k, r.points || 0]));
+/** @deprecated use levelInfo(points, floor) */
+export const levelFor = (points, floor) => levelInfo(points, floor);
 
 export const RATE_LIMITS = {
   alertsPerDay: 5,
@@ -66,36 +48,8 @@ export const SURFACES = { paved: 'Paved', gravel: 'Gravel', dirt: 'Dirt / grass'
 export const CONFIRMATIONS_TO_AUTO_FLAG = 2; // alerts with 2+ confirmations get the "community confirmed" marker
 
 // ---------- Trips, friends and sharing ----------
-// Normal trip-completion points: awarded for a voluntary arrival check-in, shared or not.
-POINT_RULES.push(
-  { key: 'trip_completed', label: 'Checked in at your destination after a trip', points: 5 },
-  { key: 'shared_trip_bonus', label: 'Shared-trip bonus (both opted in; scales with distance)', points: 'up to 20' },
-);
-POINTS.trip_completed = 5;
-
-// Shared-trip bonus bands: eligible distance = progress along the chosen route (capped at route length).
-// Only applies when BOTH people opted into shared-trip rewards before the trip completed.
-export const SHARED_TRIP_BONUS = {
-  bands: [            // minimum eligible metres → bonus points
-    { minM: 500,  points: 4 },
-    { minM: 1500, points: 8 },
-    { minM: 3000, points: 12 },
-    { minM: 6000, points: 20 },
-  ],
-  maxPerTrip: 20,
-  dailyCap: 40,
-};
-export function sharedTripBonusFor(metres) {
-  let pts = 0;
-  for (const b of SHARED_TRIP_BONUS.bands) if (metres >= b.minM) pts = b.points;
-  return Math.min(pts, SHARED_TRIP_BONUS.maxPerTrip);
-}
-
-export const TRIP_LIMITS = {
-  checkInsPerDay: 8,            // normal trip check-ins that can earn points per day
-  minTripMetres: 200,           // shorter trips do not earn check-in points
-  arrivalRadiusM: 75,           // check-in must be within this distance of the destination when a position is known
-};
+// Sharing a trip or location never earns points (see pointsPolicy.js). Trip points come from verified trips only.
+export const TRIP_LIMITS = { arrivalRadiusM: TRIP.arrivalRadiusM, minTripMetres: TRIP.minEligibleM };
 
 export const FRIEND_LIMITS = {
   idLookupsPerHour: 10,         // ID searches — reduces ID guessing
