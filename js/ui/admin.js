@@ -5,7 +5,7 @@ import { ALERT_CATEGORIES, PATH_TYPES, SURFACES, POINT_RULE_MAP } from '../backe
 import { openModal, closeModal } from './modal.js';
 import { toast } from './sheet.js';
 
-export async function openAdmin(ctx) {
+export async function openAdmin(ctx, opts = {}) {
   if (state.user?.role !== 'admin') { toast('Moderators only', 'error'); return; }
   const pendingPaths = (await ctx.backend.listPaths()).filter((p) => p.status === 'pending' || p.status === 'changes');
   const pendingAlerts = (await ctx.backend.listAlerts()).filter((a) => a.status === 'pending');
@@ -73,6 +73,25 @@ export async function openAdmin(ctx) {
     } catch (e) { lookupOut.replaceChildren(el('div', { class: 'notice danger' }, esc(e.message))); }
   };
 
+  // Add or remove points by hand — for testing, or to correct a mistake. Logged and shown in the user's history.
+  const grantAlias = el('input', { placeholder: 'Alias', maxlength: '20', autocapitalize: 'off', value: state.user?.alias || '', 'aria-label': 'Alias to adjust' });
+  const grantPts = el('input', { type: 'number', inputmode: 'numeric', min: '-1000', max: '1000', step: '1', value: '50', 'aria-label': 'Points (negative removes)' });
+  const grantReason = el('input', { placeholder: 'Reason (required, e.g. testing levels)', maxlength: '300', value: 'Testing points', 'aria-label': 'Reason' });
+  const grant = async (sign = 1) => {
+    try {
+      const r = await ctx.backend.adminGrantPoints(grantAlias.value, sign * Math.abs(Math.trunc(Number(grantPts.value) || 0)), grantReason.value);
+      toast(`${r.points > 0 ? '+' : ''}${r.points} pts for ${r.alias} · total ${r.total}`, 'success');
+      ctx.refreshBadges?.(); ctx.refreshPage?.();
+      lookupInput.value = r.alias; lookup();
+    } catch (err) { toast(err.message, 'error'); }
+  };
+  const grantForm = el('div', { class: 'card' },
+    el('div', { class: 'row', style: 'align-items:stretch' }, el('div', { class: 'field', style: 'flex:1;margin:0' }, grantAlias), el('div', { class: 'field', style: 'width:96px;flex:none;margin:0' }, grantPts)),
+    el('div', { class: 'field', style: 'margin-top:6px' }, grantReason),
+    el('div', { class: 'row wrap' },
+      el('button', { class: 'btn sm primary', onclick: () => grant(1) }, 'Add points'),
+      el('button', { class: 'btn sm ghost', onclick: () => grant(-1) }, 'Remove points')));
+
   openModal('Moderation queue', [
     el('p', { class: 'muted small' }, 'Approve only paths that are clearly public and legal to use. Approval adds the path to the community map and awards points to the contributor. Verifying an alert awards points to the reporter and anyone who confirmed it. Every action is logged.'),
     el('h3', { style: 'font-size:15px;margin:10px 0 6px' }, `Path suggestions (${pendingPaths.length})`),
@@ -82,9 +101,13 @@ export async function openAdmin(ctx) {
     el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, `Trips held for review (${trips.length})`),
     el('p', { class: 'muted small' }, 'Trips that looked too fast for their travel mode. No locations are stored — only the summary below. Approve only if it looks plausible.'),
     trips.length ? el('div', { class: 'list' }, ...trips.map(tripCard)) : el('div', { class: 'empty' }, 'No trips to check.'),
+    el('h3', { id: 'adminGrant', style: 'font-size:15px;margin:16px 0 6px' }, 'Add or remove points'),
+    el('p', { class: 'muted small' }, 'For testing, or to fix a mistake. Up to 1000 at a time. Each change is logged, shows in that user’s points history with your reason, and can be reversed below. Moderator accounts never appear on leaderboards.'),
+    grantForm,
     el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, 'Points lookup & reversals'),
     el('p', { class: 'muted small' }, 'Reverse an award that turned out to be fraudulent or mistaken. The original entry is kept and marked reversed; the user sees the reversal and your reason. Users keep their highest level.'),
-    el('div', { class: 'row' }, lookupInput, el('button', { class: 'btn', onclick: lookup }, 'Find')),
+    el('div', { class: 'row' }, el('div', { class: 'field', style: 'flex:1;margin:0' }, lookupInput), el('button', { class: 'btn', onclick: lookup }, 'Find')),
     lookupOut,
-  ]);
+  ], { onClose: () => { ctx.refreshBadges?.(); ctx.refreshPage?.(); } });
+  if (opts.focus === 'grant') requestAnimationFrame(() => { document.getElementById('adminGrant')?.scrollIntoView({ block: 'start' }); grantPts.focus({ preventScroll: true }); grantPts.select?.(); });
 }
