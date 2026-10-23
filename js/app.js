@@ -179,15 +179,15 @@ async function refreshData() {
   ctx.map.renderPaths(paths, { showPending: state.layers.pending, myId: state.user?.id });
   if (ctx.lights?.visible()) ctx.lights.render();
   updateAvatar();
-  if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome();
+  if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome({ keepState: true }); // background refresh: don't re-open a panel the user minimised
   refreshShares();
 }
 
 // ---------- home sheet ----------
-function showHome() {
+function showHome({ keepState = false } = {}) {
   set({ destination: null, routes: [], selectedRouteId: null, routeError: null });
   ctx.map.clearRoutes(); ctx.map.setDestination(null); ctx.map.setOrigin(null);
-  hideSheet(false); collapse(false);
+  hideSheet(false); if (!keepState) collapse(false);
   const live = integrations.routing !== 'sample';
   const nearby = state.alerts.length;
   const quick = SAMPLE_PLACES.slice(0, 4);

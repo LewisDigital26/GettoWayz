@@ -150,6 +150,7 @@ export class SupabaseBackend {
     const r = await this.rpc('admin_user_points', { p_alias: alias });
     return r ? { ...r, entries: (r.entries || []).map((e) => ({ ...e, status: e.status || 'awarded' })) } : null;
   }
+  async adminGrantPoints(alias, points, reason) { const r = await this.rpc('admin_grant_points', { p_alias: alias, p_points: Math.trunc(Number(points)) || 0, p_reason: reason }); this.emit(); return r; }
   async adminReverseAward(entryId, reason) { const n = await this.rpc('admin_reverse_award', { p_entry: entryId, p_reason: reason }); this.emit(); return n; }
   async adminReverseSource(refType, refId, reason) { const n = await this.rpc('admin_reverse_source', { p_ref_type: refType, p_ref_id: refId, p_reason: reason }); this.emit(); return n; }
   async adminTripsForReview() { return (await this.rpc('admin_trips_for_review', {})) || []; }

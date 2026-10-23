@@ -1,5 +1,5 @@
--- Migration 006 — moderators appear on leaderboards like everyone else.
--- Run once in the Supabase SQL editor after migration-005-manual-points.sql. Safe to re-run.
+-- Migration 007 — moderators appear on leaderboards like everyone else.
+-- Run once in the Supabase SQL editor after migration-005-manual-points.sql and migration-006-realtime-alerts.sql. Safe to re-run.
 -- Moderators still only appear if they opted in (Leaderboard tab › privacy switches), exactly like other users.
 
 create or replace function leaderboard_page(p_scope text, p_period text, p_offset int default 0, p_limit int default 20)

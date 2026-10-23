@@ -188,8 +188,8 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
   max-height: 72vh; display: flex; flex-direction: column;
   padding-bottom: var(--sab-map); transition: transform .25s ease;
 }
-.sheet.collapsed { transform: translateY(calc(100% - 64px - var(--sab-map))); }
-.sheet-handle { padding: 10px 0 6px; display: grid; place-items: center; cursor: grab; }
+.sheet.collapsed { transform: translateY(calc(100% - 78px - var(--sab-map))); }
+.sheet-handle { padding: 12px 0 8px; display: grid; place-items: center; cursor: grab; touch-action: none; }
 .sheet-handle span { width: 42px; height: 5px; border-radius: 3px; background: var(--line); }
 .sheet-content { overflow-y: auto; padding: 0 16px 16px; overscroll-behavior: contain; }
 .sheet-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
@@ -356,7 +356,7 @@ table.rules td:last-child { text-align: right; font-weight: 700; color: var(--ac
 /* ---------- Desktop ---------- */
 @media (min-width: 900px) {
   .sheet { left: 16px; right: auto; bottom: 16px; width: 400px; border-radius: 22px; max-height: calc(100vh - 100px); }
-  .sheet.collapsed { transform: translateY(calc(100% - 64px)); }
+  .sheet.collapsed { transform: translateY(calc(100% - 78px)); }
   .fabs { bottom: 24px; }
   .modal { align-items: center; }
   .modal-card { border-radius: 22px; }
@@ -717,3 +717,11 @@ ol.lb-list { list-style: none; padding: 0; margin: 0; }
 }
 .idcard .gwid { font-size: 20px; white-space: nowrap; display: block; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 420px) { html.large-text .tab-label:has(.lbl-short) .lbl-long { display: none; } html.large-text .lbl-short { display: inline; } }
+
+/* Draggable sheet: follows the finger while dragging, snaps with an ease after */
+.sheet-title { touch-action: none; cursor: grab; }
+.sheet-title button, .sheet-title a { cursor: pointer; }
+.sheet.dragging { transition: none; cursor: grabbing; }
+.sheet-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 12px; }
+.sheet.collapsed .sheet-content { overflow: hidden; }
+.sheet.collapsed .sheet-content > :not(.sheet-title) { visibility: hidden; }
