@@ -14,7 +14,7 @@ import { openReportFlow, openAlertDetail, alertsNearRoute } from './ui/alerts.js
 import { startSuggestPath, openPathDetail } from './ui/paths.js';
 import { openAccount, requireSignIn, updateAvatar, openAppearance } from './ui/account.js';
 import { createRealtime } from './providers/realtime.js';
-import { openFriends, openShareTrip, openCheckIn, renderShareBanner, openShareViewer, freshness } from './ui/friends.js';
+import { openFriends, openShareTrip, askGoLive, openGoToFriend, shareForDestination, openCheckIn, renderShareBanner, openShareViewer, freshness } from './ui/friends.js';
 import { createStreetlightProvider } from './providers/streetlights.js';
 import { Streetlights, lightingBlock } from './ui/streetlights.js';
 import { STREETLIGHTS } from './backend/rules.js';
@@ -45,6 +45,7 @@ export const ctx = {
   planRoute,
   setDestination,
   showHome,
+  openFriends: (tab) => openFriends(ctx, tab),
 };
 
 // ---------- boot ----------
@@ -85,11 +86,15 @@ async function refreshShares() {
   const incoming = shares.filter((s) => s.direction === 'incoming' && s.status !== 'ended');
   const ids = incoming.map((s) => s.id).join(',');
   if (ids && ids !== lastShareIds) {
-    for (const s of incoming) if (!lastShareIds.includes(s.id)) toast(`${s.from.alias} is sharing their ${s.type === 'trip' ? 'trip' : 'location'} with you — tap Friends › Sharing to view`);
+    for (const s of incoming) if (!lastShareIds.includes(s.id)) toast(s.type === 'trip' && s.status === 'invited' ? `${s.from.alias} wants to share a trip with you — tap View to accept or decline` : `${s.from.alias} is sharing their ${s.type === 'trip' ? 'trip' : 'location'} with you — tap Friends › Sharing to view`);
   }
   lastShareIds = ids;
-  // my active trip share ended remotely (blocked / expired)?
+  // my active trip share ended remotely (declined / unfriended / blocked / expired)?
   if (ctx.activeTripShare && !shares.some((s) => s.id === ctx.activeTripShare && s.status !== 'ended')) ctx.activeTripShare = null;
+  // refresh the route sheet's share line only when that share's state actually changed
+  const sh = state.destination ? shareForDestination(shares, state.destination) : null;
+  const key = sh ? `${sh.id}:${sh.status}:${sh.live}` : '';
+  if (key !== ctx.shareKey) { ctx.shareKey = key; if (state.destination && state.routes.length && !state.navigating && !state.routing) renderRouteSheet(); }
 }
 function focusShare(id) {
   const s = ctx.shares.find((x) => x.id === id);
@@ -127,7 +132,8 @@ function showHome() {
       live ? 'Routes use public ways from OpenStreetMap, plus moderator-approved community paths whenever they make a trip quicker.'
            : 'No routing key is configured, so routes between these sample places are hand-made examples. Other destinations get a labelled straight-line estimate.'),
     el('div', { class: 'row wrap', style: 'margin-bottom:12px' },
-      ...quick.map((p) => el('button', { class: 'btn sm', onclick: () => setDestination({ ...p, source: 'sample' }) }, p.kind === 'park' ? '🌳' : p.kind === 'transport' ? '🚉' : '📍', ' ', p.name.replace('Coventry ', '')))),
+      ...quick.map((p) => el('button', { class: 'btn sm', onclick: () => setDestination({ ...p, source: 'sample' }) }, p.kind === 'park' ? '🌳' : p.kind === 'transport' ? '🚉' : '📍', ' ', p.name.replace('Coventry ', ''))),
+      state.user ? el('button', { class: 'btn sm', onclick: () => openGoToFriend(ctx) }, '🫂 Go to a friend') : null),
     el('div', { class: 'row between', style: 'margin-bottom:6px' },
       el('div', { class: 'stat' }, el('strong', {}, String(nearby)), el('span', {}, 'active alerts nearby')),
       el('div', { class: 'stat' }, el('strong', {}, String(state.paths.filter((p) => p.status === 'approved').length)), el('span', {}, 'community paths approved')),
@@ -287,6 +293,7 @@ function locate({ thenRoute = false, follow = false, onFirst = null } = {}) {
   if (watchId != null) navigator.geolocation.clearWatch(watchId);
   watchId = navigator.geolocation.watchPosition(onPos, onErr, { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 });
 }
+function stopWatch() { if (watchId != null) { navigator.geolocation.clearWatch(watchId); watchId = null; } }
 $('#locateBtn').addEventListener('click', () => {
   if (state.position) { ctx.map.flyTo([state.position.lat, state.position.lng], 16); return; }
   openModal('Use your location?', [
@@ -300,7 +307,8 @@ $('#locateBtn').addEventListener('click', () => {
 let lastPush = 0;
 function pushPosition(pos) {
   if (!state.user || Date.now() - lastPush < 4000) return;
-  const outgoing = ctx.shares.filter((s) => s.direction === 'outgoing' && s.status === 'active');
+  // Only accepted shares, and for trips only while the traveller has live progress on.
+  const outgoing = ctx.shares.filter((s) => s.direction === 'outgoing' && s.status === 'active' && (s.type !== 'trip' || s.live));
   if (!outgoing.length) return;
   lastPush = Date.now();
   for (const s of outgoing) ctx.backend.updateSharePosition(s.id, { lat: pos.lat, lng: pos.lng }).catch(() => {});
@@ -447,7 +455,7 @@ function renderRouteSheet() {
     el('input', { type: 'checkbox', checked: ctx.preferLit, onchange: (e) => { ctx.preferLit = e.target.checked; applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } }),
     el('span', { class: 'small' }, el('strong', {}, 'Prefer routes with confirmed lighting'), ' — ranks by lamps recently reported working. Not a safety rating.')) : null;
   ctx.map.renderLightingOverlay(ctx.lights?.visible() ? r.lighting?.segments : null);
-  renderSheet([head, cards, litToggle,
+  renderSheet([head, cards, litToggle, r.source === 'estimate' ? null : shareBlock(),
     el('div', { class: `notice ${r.source === 'estimate' ? 'warn' : 'info'}` }, r.basis),
     ctx.streetlights ? lightingBlock(r.lighting, { night: !!ctx.lights?.isNight }) : null,
     el('div', { class: 'row', style: 'margin:10px 0' },
@@ -457,6 +465,15 @@ function renderRouteSheet() {
     el('h3', { style: 'font-size:14px;margin:12px 0 4px' }, 'Directions'), steps,
     el('p', { class: 'small', style: 'color:var(--text-3)' }, 'Community paths are user suggestions approved by moderators for inclusion on the map. Alerts are community reports and may be out of date. Nothing here is a guarantee of safety or legality — follow signs and local rules.'),
   ]);
+}
+/** "Share route with a friend" — or, once shared, who it's shared with and its state. */
+function shareBlock() {
+  const sh = state.user ? shareForDestination(ctx.shares, state.destination) : null;
+  if (!sh) return el('button', { class: 'btn block', style: 'margin:6px 0', onclick: () => { if (requireSignIn(ctx, 'share routes with friends')) openShareTrip(ctx, () => refreshShares(), { preselect: state.destination?.friendId }); } }, '👥 Share route with a friend');
+  const txt = sh.status === 'invited' ? `Invitation sent to ${esc(sh.to.alias)} — waiting for them to accept`
+    : sh.live ? `${esc(sh.to.alias)} is following · live progress on` : `${esc(sh.to.alias)} accepted · route only (live progress turns on when you start)`;
+  return el('div', { class: 'notice info row between', style: 'margin:6px 0;gap:8px' }, el('span', { class: 'small' }, '👥 ', txt),
+    el('button', { class: 'btn sm danger', onclick: async () => { try { await ctx.backend.stopShare(sh.id); toast('Route sharing stopped'); refreshShares(); } catch (e) { toast(e.message, 'error'); } } }, sh.status === 'invited' ? 'Cancel' : 'Stop'));
 }
 function labelBasis(rt) {
   if (rt.label === 'Quickest') return 'Shortest estimated time for this mode.';
@@ -481,9 +498,17 @@ async function startNavigation() {
   const r = selectedRoute();
   if (!r) return;
   if (state.user && r.source !== 'estimate') {
-    const social = await ctx.backend.listSocial();
-    if (social.friends.length) {
-      openShareTrip(ctx, (share) => { ctx.activeTripShare = share?.id || null; beginNavigation(r); if (share) toast(`Sharing this trip with ${share.to.alias} — ends when you arrive or stop`, 'success'); });
+    // Already shared while planning? Offer live progress for this trip (opt-in, per trip).
+    const existing = shareForDestination(ctx.shares, state.destination);
+    if (existing) {
+      ctx.activeTripShare = existing.id;
+      if (existing.live) return beginNavigation(r);
+      return askGoLive(ctx, existing, () => { refreshShares(); beginNavigation(r); });
+    }
+    let social = null;
+    try { social = await ctx.backend.listSocial(); } catch { /* offline: navigate without offering */ }
+    if (social?.friends.length) {
+      openShareTrip(ctx, (share) => { ctx.activeTripShare = share?.id || null; beginNavigation(r); if (share) refreshShares(); }, { live: true, navigating: true, preselect: state.destination?.friendId });
       return;
     }
   }
@@ -513,7 +538,7 @@ function endNavigation() {
   const r = selectedRoute(), dest = state.destination;
   const shareId = ctx.activeTripShare;
   const finish = () => {
-    if (shareId) ctx.backend.stopShare(shareId, 'cancelled').catch(() => {});
+    if (shareId) ctx.backend.stopShare(shareId, 'cancelled').then(refreshShares).catch(() => {}); // ending navigation ends trip sharing
     ctx.activeTripShare = null;
     exitNavigationUi();
   };
@@ -527,6 +552,8 @@ function exitNavigationUi() {
   $('#navbar').hidden = true; $('#fabs').hidden = false; $('#modebar').hidden = false; $('.topbar').hidden = false;
   $('#navbar').classList.remove('driving');
   stopVoice();
+  // No background tracking after the trip: stop watching location unless a location share you started is still running.
+  if (!ctx.shares.some((s) => s.direction === 'outgoing' && s.type === 'location' && s.status === 'active')) stopWatch();
   hideSheet(false);
   ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute);
   renderRouteSheet();
@@ -562,6 +589,12 @@ function speakStep(i, step) {
 }
 function stopVoice() { if (speechOk()) try { speechSynthesis.cancel(); } catch { /* ignore */ } }
 
+/** On arrival, send one final position (so the server can verify it) and end trip sharing straight away. */
+async function shareArrived(pos) {
+  const id = ctx.activeTripShare; if (!id) return;
+  try { await ctx.backend.updateSharePosition(id, { lat: pos.lat, lng: pos.lng }); await ctx.backend.stopShare(id, 'arrived'); } catch { /* already ended */ }
+  refreshShares();
+}
 function onNavTick(pos) {
   const r = selectedRoute(); if (!r) return;
   const me = [pos.lat, pos.lng];
@@ -574,7 +607,7 @@ function onNavTick(pos) {
   for (let i = 0; i < r.steps.length; i++) { acc += r.steps[i].dist; if (done < acc) { stepI = i; break; } stepI = i; }
   if (haversine(me, r.geometry[r.geometry.length - 1]) < 25) {
     showStep(r.steps.length - 1, r, 0);
-    if (!arrivedShown) { arrivedShown = true; toast('You have arrived 🎉', 'success'); if (state.user && r.source !== 'estimate') endNavigation(); }
+    if (!arrivedShown) { arrivedShown = true; toast('You have arrived 🎉', 'success'); shareArrived(pos); if (state.user && r.source !== 'estimate') endNavigation(); }
     return;
   }
   if (bestD > 80) toast('You look off-route — directions may not match where you are', 'error');
