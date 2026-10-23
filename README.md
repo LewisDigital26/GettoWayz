@@ -197,6 +197,26 @@ How the distance is worked out and protected:
 
 **Setup:** run `supabase/migration-004-points.sql` once after 002 and 003. No new environment variables or services.
 
+## App layout & navigation
+
+Five tabs, the same everywhere: **Leaderboard · Friends · Map · Activity · Profile**. Map is the start screen and sits raised in the centre.
+
+| Tab | What's on it |
+|---|---|
+| Leaderboard | Your rank and points for the chosen board (Everyone / Friends × This week / All-time), top three, full list, who-can-see-me switches, link to the points rules |
+| Friends | “Sharing now” card with Stop, your Ghetto Wayz ID, add by ID, friends, requests, sharing history; *Share a trip* uses the route planned on the map |
+| Map | Search, travel mode, routes, navigation, report / add path, layers and a full map legend |
+| Activity | “Needs you” (friend requests, trip invitations, requested changes) and a feed of trips, points, contributions and sharing, filterable |
+| Profile | Avatar, ID, level and progress, level milestones, contributions, location sharing, privacy, notifications, accessibility, app settings |
+
+- **Phones and tablets:** a bottom tab bar that respects the safe area. The map, its sheet and its buttons sit above it.
+- **900 px and wider:** a compact side rail, with the same tabs in the same order.
+- **While navigating or drawing a path:** the bar hides, so only the directions and End are on screen.
+- **Switching tabs:** the map stays loaded underneath, so a planned route, search and zoom survive.
+- **URLs:** each tab has its own (`#leaderboard`, `#friends`, `#activity`, `#profile`). Back moves between tabs, and closes an open pop-up first.
+- **Signed out:** the map, search, routing and the public leaderboard work. Friends, Activity and private Profile settings show what they're for, with Sign in / Create account. Nothing private is loaded.
+- **Device-only settings:** larger text, reduce motion and in-app alerts are stored in `gw:prefs` in localStorage. They are never sent to the server.
+
 ## Project layout
 
 ```
@@ -207,7 +227,8 @@ js/map.js               Leaflet wrapper: tiles, routes, pins, draw tool
 js/state.js             tiny store
 js/providers/           routing.js (ORS / OSRM / sample), geocoding.js (Nominatim), streetlights.js (Overpass / sample + status + scoring), realtime.js, sampleData.js
 js/backend/             index.js (interface), localDemo.js, social.js (friends/sharing/rewards), seed.js, rules.js
-js/ui/                  sheet, modal, alerts, paths, account, admin, friends, streetlights screens
+js/ui/                  tabs.js (tab shell + router), points.js (Leaderboard), friends.js (Friends), activity.js (Activity), account.js (Profile + sign-in), avatar.js; sheet, modal, alerts, paths, admin, streetlights
+js/prefs.js             device-only settings: larger text, reduce motion, in-app alerts
 sw.js                   caches the app shell for offline launch (tiles/APIs are never cached)
 manifest.webmanifest    PWA manifest + icons/
 config.example.js       copy to config.local.js
