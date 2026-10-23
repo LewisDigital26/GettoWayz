@@ -38,6 +38,7 @@ export class Traffic {
     if (on) {
       this.timer = setInterval(() => this.load(), 60000);
       this.load();
+      this.ctx.refreshRouteSheet?.();
       if (!silent) toast('Live traffic on — roads are coloured by current speed');
     } else {
       this.incidents = []; this.ctx.map.renderTraffic([]);
@@ -61,9 +62,34 @@ export class Traffic {
     } finally { this.loading = false; }
   }
 
-  /** Incidents within `metres` of a route line (the route sheet shows these next to community alerts). */
+  /**
+   * Incidents for the area covered by a set of route options (used to rank driving routes by real travel time).
+   * Works with the map layer off. Skips areas over the API's size limit. Returns null if nothing could be fetched.
+   */
+  async fetchForRoutes(routes) {
+    if (!this.provider || !routes?.length) return null;
+    let s = 90, w = 180, n = -90, e = -180;
+    for (const r of routes) for (const [la, ln] of r.geometry || []) { s = Math.min(s, la); n = Math.max(n, la); w = Math.min(w, ln); e = Math.max(e, ln); }
+    if (s > n) return null;
+    s -= 0.005; n += 0.005; w -= 0.008; e += 0.008;
+    const km2 = (n - s) * 111 * (e - w) * 111 * Math.cos(((s + n) / 2) * Math.PI / 180);
+    if (km2 > 9000) return null;           // TomTom caps a bbox at 10,000 km²
+    try { this.routeIncidents = await this.provider.fetchIncidents({ south: s, west: w, north: n, east: e }); return this.routeIncidents; }
+    catch { return null; }
+  }
+
+  /**
+   * Incidents that lie along a route line: most of the incident's own points must be within `metres` of the route,
+   * so a jam on a road that merely crosses the route doesn't count.
+   */
   nearRoute(geometry, metres = 30) {
-    return this.incidents.filter((t) => t.geometry.some((p) => distanceToLine(p, geometry) <= metres));
+    const seen = new Set(), out = [];
+    for (const t of [...(this.routeIncidents || []), ...this.incidents]) {
+      if (seen.has(t.id)) continue; seen.add(t.id);
+      const close = t.geometry.filter((p) => distanceToLine(p, geometry) <= metres).length;
+      if (close && close >= Math.ceil(t.geometry.length * 0.5)) out.push(t);
+    }
+    return out;
   }
 
   openDetail(t) {

@@ -120,8 +120,6 @@ export class GwMap {
       this.trafficLayer.addTo(this.map);
     } else { this.trafficTiles?.remove(); this.trafficLayer.remove(); }
   }
-  bounds() { return this.map.getBounds(); }
-  zoom() { return this.map.getZoom(); }
   renderTraffic(incidents, { categories, onClick } = {}) {
     this.trafficLayer.clearLayers();
     for (const t of incidents) {

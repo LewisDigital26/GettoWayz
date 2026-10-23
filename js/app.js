@@ -388,6 +388,8 @@ async function planRoute() {
   if (!state.destination || !state.origin) return;
   const dest = state.destination, origin = state.origin;
   set({ routing: true, routeError: null, routes: [], selectedRouteId: null });
+  ctx.routePicked = false;
+  if (ctx.trafficUi) ctx.trafficUi.routeIncidents = null;
   renderRouteSheet();
   try {
     if (haversine([origin.lat, origin.lng], [dest.lat, dest.lng]) < 15) throw new Error('You are already there.');
@@ -396,6 +398,7 @@ async function planRoute() {
     if (result.unsupported) throw new Error(result.unsupported);
     const routes = annotateRoutes(result.routes);
     set({ routes, routeProvider: result.provider, selectedRouteId: routes[0]?.id || null, routing: false });
+    applyRouteTraffic(routes);
     addCommunityRoutes(routes, [origin.lat, origin.lng], [dest.lat, dest.lng], state.mode)
       .then((latest) => scoreLighting(latest).then(() => latest))
       .then((latest) => { if (state.routes === latest && !state.navigating) { applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } });
@@ -415,7 +418,7 @@ async function addCommunityRoutes(routes, from, to, mode) {
   const extra = await communityRoutes({ routing: ctx.routing, from, to, mode, paths: state.paths, base: routes }).catch(() => []);
   if (!extra.length || state.routes !== routes || state.navigating) return state.routes;
   const keepSelection = state.selectedRouteId !== routes[0]?.id; // user already picked one — don't move it
-  const all = annotateRoutes([...routes, ...extra]).sort((a, b) => a.durationS - b.durationS);
+  const all = annotateRoutes([...routes, ...extra]).sort((a, b) => routeRank(a) - routeRank(b));
   set({ routes: all, selectedRouteId: keepSelection ? state.selectedRouteId : all[0].id });
   ctx.map.renderRoutes(all, state.selectedRouteId, state.mode, selectRoute, { fit: false });
   renderRouteSheet();
@@ -432,6 +435,25 @@ function densify(line, step) {
   return out;
 }
 
+/** Sort key for "quickest": travel time including live traffic; a route through a closed road goes last. */
+const routeRank = (r) => r.durationS + (r.roadClosed ? 1e7 : 0);
+
+/**
+ * Driving: fetch live incidents for the area the route options cover, add their delays to each route's time,
+ * and re-rank so "Quickest" is quickest in current traffic. Keeps a route the user picked themselves.
+ */
+async function applyRouteTraffic(routes) {
+  if (state.mode !== 'drive' || !ctx.trafficUi?.provider) return;
+  const dest = state.destination;
+  const got = await ctx.trafficUi.fetchForRoutes(routes);
+  if (!got || state.destination !== dest || state.navigating || !state.routes.length) return;
+  annotateRoutes(state.routes);
+  state.routes.sort((a, b) => routeRank(a) - routeRank(b));
+  set({ routes: [...state.routes], selectedRouteId: ctx.routePicked ? state.selectedRouteId : state.routes[0].id });
+  ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false });
+  renderRouteSheet();
+}
+
 /** Adds community-path coverage, nearby alerts and friendly labels to each route. */
 function annotateRoutes(routes) {
   const approved = state.paths.filter((p) => p.status === 'approved');
@@ -446,13 +468,21 @@ function annotateRoutes(routes) {
     }
     r.communityPathIds = [...used];
     r.alertsNear = alertsNearRoute(state.alerts, r.geometry, 40);
-    r.trafficNear = ctx.trafficUi?.visible() ? ctx.trafficUi.nearRoute(r.geometry, 30) : [];
+    // Live traffic: driving routes use incidents fetched for the route area (map layer on or off); other modes only list them.
+    r.baseDurationS ??= r.durationS;
+    const driveTraffic = state.mode === 'drive' && !!ctx.trafficUi?.routeIncidents;
+    r.trafficNear = driveTraffic || ctx.trafficUi?.visible() ? ctx.trafficUi.nearRoute(r.geometry, 30) : [];
+    r.trafficChecked = driveTraffic;
+    r.trafficDelayS = driveTraffic ? r.trafficNear.reduce((n, t) => n + (t.delay || 0), 0) : 0;
+    r.roadClosed = driveTraffic && r.trafficNear.some((t) => t.category === 8 || t.delayLevel === 4);
+    r.durationS = r.baseDurationS + r.trafficDelayS;
+    if (driveTraffic && r.basis) r.basis = r.basis.replace('Travel time is a free-flow estimate — no live traffic.', 'Travel time includes live traffic delays from TomTom.');
   }
   const withPaths = routes.filter((r) => r.source !== 'estimate' && r.communityPathIds.length > 0);
   const mostPaths = withPaths.length && routes.length > 1 ? withPaths.reduce((a, b) => (a.communityPathIds.length >= b.communityPathIds.length ? a : b)) : null;
   const rest = routes.filter((r) => r !== mostPaths && r.source !== 'estimate');
-  const fastest = rest.length ? rest.reduce((a, b) => (a.durationS <= b.durationS ? a : b)) : null;
-  const fastestAll = routes.filter((r) => r.source !== 'estimate').reduce((a, b) => (!a || b.durationS < a.durationS ? b : a), null);
+  const fastest = rest.length ? rest.reduce((a, b) => (routeRank(a) <= routeRank(b) ? a : b)) : null;
+  const fastestAll = routes.filter((r) => r.source !== 'estimate').reduce((a, b) => (!a || routeRank(b) < routeRank(a) ? b : a), null);
   for (const r of routes) {
     if (r.source === 'estimate') continue;
     if (r === mostPaths && r === fastestAll && r.viaCommunity) r.label = 'Community shortcut';
@@ -486,6 +516,7 @@ function applyLitPreference() {
 }
 
 function selectRoute(id) {
+  if (id !== state.selectedRouteId) ctx.routePicked = true;
   set({ selectedRouteId: id });
   ctx.map.renderRoutes(state.routes, id, state.mode, selectRoute);
   renderRouteSheet();
@@ -510,11 +541,16 @@ function renderRouteSheet() {
       el('div', { class: 'label' }, rt.label, el('span', { class: `chip ${rt.source}` }, rt.source === 'live' ? 'Live' : rt.source === 'sample' ? 'Sample' : 'Estimate'),
         rt.communityPathIds.length ? el('span', { class: 'chip verified' }, `${rt.communityPathIds.length} community path${rt.communityPathIds.length > 1 ? 's' : ''}`) : null,
         rt.alertsNear.length ? el('span', { class: 'chip pending' }, `${rt.alertsNear.length} alert${rt.alertsNear.length > 1 ? 's' : ''}`) : null,
-        rt.trafficNear?.length ? el('span', { class: 'chip', style: 'color:#ffb020;border-color:#ffb020' }, `🚦 ${rt.trafficNear.length} traffic`) : null,
+        rt.roadClosed ? el('span', { class: 'chip', style: 'color:#ff4d4f;border-color:#ff4d4f' }, '⛔ Road closed') : null,
+        rt.trafficChecked
+          ? (rt.trafficDelayS >= 60
+            ? el('span', { class: 'chip', style: 'color:#ffb020;border-color:#ffb020' }, `🚦 +${Math.round(rt.trafficDelayS / 60)} min traffic`)
+            : el('span', { class: 'chip', style: 'color:var(--verified);border-color:var(--verified)' }, '🚦 No delays'))
+          : rt.trafficNear?.length ? el('span', { class: 'chip', style: 'color:#ffb020;border-color:#ffb020' }, `🚦 ${rt.trafficNear.length} traffic`) : null,
         rt.lighting?.covered ? el('span', { class: 'chip', style: 'color:#ffd34d;border-color:#ffd34d' }, `🔦 ${rt.lighting.pct.confirmed}% lit·confirmed`) : null,
-        state.mode === 'drive' && rt.source === 'live' && !ctx.trafficUi?.visible() ? el('span', { class: 'chip' }, 'No live traffic') : null),
+        state.mode === 'drive' && rt.source === 'live' && !rt.trafficChecked && !ctx.trafficUi?.visible() ? el('span', { class: 'chip' }, 'No live traffic') : null),
       el('div', { class: 'basis' }, labelBasis(rt))),
-    el('div', { class: 'stats' }, el('strong', {}, fmtDuration(rt.durationS)), el('span', {}, fmtDistance(rt.distanceM))))));
+    el('div', { class: 'stats' }, el('strong', {}, fmtDuration(rt.durationS)), el('span', {}, fmtDistance(rt.distanceM)), timeDiff(rt)))));
 
   const alertsBlock = r.alertsNear.length
     ? el('div', {}, el('h3', { style: 'font-size:14px;margin:8px 0 6px' }, 'Alerts along this route'), el('div', { class: 'list' }, ...r.alertsNear.map(alertRow)))
@@ -550,8 +586,16 @@ function shareBlock() {
   return el('div', { class: 'notice info row between', style: 'margin:6px 0;gap:8px' }, el('span', { class: 'small' }, '👥 ', txt),
     el('button', { class: 'btn sm danger', onclick: async () => { try { await ctx.backend.stopShare(sh.id); toast('Route sharing stopped'); refreshShares(); } catch (e) { toast(e.message, 'error'); } } }, sh.status === 'invited' ? 'Cancel' : 'Stop'));
 }
+/** "+X min" against the quickest option (shown on the slower route cards). */
+function timeDiff(rt) {
+  const best = state.routes.filter((r) => r.source !== 'estimate' && !r.roadClosed).reduce((m, r) => Math.min(m, r.durationS), Infinity);
+  const d = Math.round((rt.durationS - best) / 60);
+  if (!Number.isFinite(best) || rt.source === 'estimate' || d < 1) return null;
+  return el('span', { class: 'time-diff', title: `${d} min slower than the quickest option` }, `+${d} min`);
+}
+
 function labelBasis(rt) {
-  if (rt.label === 'Quickest') return 'Shortest estimated time for this mode.';
+  if (rt.label === 'Quickest') return rt.trafficChecked ? 'Quickest in current traffic (live TomTom delays included).' : 'Shortest estimated time for this mode.';
   if (rt.label === 'Community shortcut') return 'Quickest option, thanks to a moderator-approved community path the map engine doesn’t know about yet.';
   if (rt.label === 'More verified paths') return 'Uses more moderator-approved community paths. Approval means the path is on the map — not a safety rating.';
   if (rt.label === 'Most confirmed lighting') return 'Highest share of lamps recently confirmed working by the community. Not a safety guarantee.';

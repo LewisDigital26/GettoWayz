@@ -209,6 +209,7 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
 .route-card .stats { text-align: right; }
 .route-card .stats strong { font-size: 18px; font-family: var(--font-display); display: block; }
 .route-card .stats span { color: var(--text-2); font-size: 12.5px; }
+.route-card .stats .time-diff { display: block; color: #ffb020; font-weight: 600; margin-top: 2px; }
 
 .chip {
   display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700;

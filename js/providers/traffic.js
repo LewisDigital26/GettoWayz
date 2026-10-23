@@ -37,7 +37,9 @@ export class TomTomTraffic {
 
   /** @param bounds Leaflet LatLngBounds. Returns [{ id, category, lat, lng, geometry:[[lat,lng]], delay, delayLevel, description, from, to, roads, start, end }] */
   async fetchIncidents(bounds) {
-    const bbox = [bounds.getWest(), bounds.getSouth(), bounds.getEast(), bounds.getNorth()].map((n) => n.toFixed(4)).join(',');
+    // Accepts a Leaflet LatLngBounds or a plain { south, west, north, east } (what GwMap.bounds() returns).
+    const b = typeof bounds.getWest === 'function' ? { west: bounds.getWest(), south: bounds.getSouth(), east: bounds.getEast(), north: bounds.getNorth() } : bounds;
+    const bbox = [b.west, b.south, b.east, b.north].map((n) => Number(n).toFixed(4)).join(',');
     const hit = this.cache.get(bbox);
     if (hit && Date.now() - hit.at < this.ttl) return hit.incidents;
     const url = `https://api.tomtom.com/traffic/services/5/incidentDetails?key=${encodeURIComponent(this.key)}&bbox=${bbox}&fields=${encodeURIComponent(FIELDS)}&language=en-GB&timeValidityFilter=present`;
