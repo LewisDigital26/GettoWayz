@@ -1,7 +1,9 @@
 // Accounts, points, levels, leaderboard, rules.
 import { $, el, esc, fmtAgo } from '../util.js';
 import { state } from '../state.js';
-import { POINT_RULES, LEVELS, RATE_LIMITS, levelFor } from '../backend/rules.js';
+import { RATE_LIMITS } from '../backend/rules.js';
+import { levelInfo } from '../backend/pointsPolicy.js';
+import { openPoints } from './points.js';
 import { openModal, closeModal } from './modal.js';
 import { toast } from './sheet.js';
 import { openAdmin } from './admin.js';
@@ -86,55 +88,26 @@ function openAuth(ctx, mode = 'signin') {
 
 async function openProfile(ctx) {
   const u = state.user;
-  const { level, next, progress } = levelFor(u.points);
-  const history = await ctx.backend.pointHistory(u.id);
-  const stats = await ctx.backend.myStats?.();
-  const optIn = el('input', { type: 'checkbox' }); optIn.checked = !!u.leaderboardOptIn;
-  optIn.addEventListener('change', async () => { await ctx.backend.updateUser({ leaderboardOptIn: optIn.checked }); toast(optIn.checked ? 'You are on the leaderboard' : 'Removed from leaderboard'); });
-
-  const tabs = { Points: pointsTab, Leaderboard: leaderboardTab, Rules: rulesTab };
-  const tabBar = el('div', { class: 'tabs' }), tabBody = el('div');
-  for (const name of Object.keys(tabs)) tabBar.append(el('button', { onclick: (e) => show(name, e.target) }, name));
-  async function show(name, btn) { [...tabBar.children].forEach((b) => b.classList.toggle('active', b === btn)); tabBody.replaceChildren(await tabs[name]()); }
-
-  function pointsTab() {
-    return el('div', {},
-      stats ? el('p', { class: 'muted small' }, `Today: ${stats.alertsToday}/${RATE_LIMITS.alertsPerDay} reports · ${stats.pathsToday}/${RATE_LIMITS.pathSuggestionsPerDay} path suggestions`) : null,
-      history.length
-        ? el('div', { class: 'list' }, ...history.map((h) => el('div', { class: 'item' }, el('div', { class: 'emoji' }, '⭐'), el('div', { class: 'body' }, el('div', { class: 't' }, POINT_RULES.find((r) => r.key === h.rule)?.label || h.rule), el('div', { class: 's' }, fmtAgo(h.at))), el('strong', { style: 'color:var(--accent)' }, `+${h.points}`))))
-        : el('div', { class: 'empty' }, el('div', { class: 'big' }, '🌱'), 'No points yet. Points arrive when a moderator approves or verifies one of your contributions.'));
-  }
-  async function leaderboardTab() {
-    const rows = await ctx.backend.leaderboard();
-    return el('div', {},
-      el('label', { class: 'row', style: 'gap:10px;margin-bottom:10px' }, optIn, el('span', { class: 'small' }, 'Show my alias on the leaderboard (opt-in). Only your alias, points and level are shown — never your location or travel.')),
-      rows.length ? el('div', { class: 'list' }, ...rows.map((r, i) => el('div', { class: `lb-row ${r.isMe ? 'me' : ''}` }, el('span', { class: 'rank' }, `#${i + 1}`), el('div', {}, el('div', { style: 'font-weight:600' }, r.alias, r.isMe ? ' (you)' : ''), el('div', { class: 'small muted' }, r.level, r.sample ? ' · sample' : '')), el('strong', {}, r.points))))
-             : el('div', { class: 'empty' }, 'Nobody has opted in yet.'),
-      !ctx.backend.isShared ? el('p', { class: 'small muted', style: 'margin-top:8px' }, 'Demo mode: this leaderboard only contains sample users and accounts created on this device.') : null);
-  }
-  function rulesTab() {
-    return el('div', {},
-      el('table', { class: 'rules' }, ...POINT_RULES.map((r) => el('tr', {}, el('td', {}, r.label), el('td', {}, typeof r.points === 'number' ? `+${r.points}` : r.points)))),
-      el('h3', { style: 'font-size:14px;margin:12px 0 6px' }, 'Levels'),
-      el('table', { class: 'rules' }, ...LEVELS.map((l) => el('tr', {}, el('td', {}, l.name), el('td', {}, `${l.min} pts`)))),
-      el('div', { class: 'notice', style: 'margin-top:12px' }, `Abuse prevention: max ${RATE_LIMITS.alertsPerDay} reports, ${RATE_LIMITS.pathSuggestionsPerDay} path suggestions and ${RATE_LIMITS.confirmationsPerDay} confirmations per day. Submitting earns nothing — only approved or verified contributions count, and you cannot confirm your own reports. Duplicate reports at the same spot are blocked.`));
-  }
-
+  const { level, next, progress, toNext } = levelInfo(u.points, u.levelFloor);
+  const stats = await ctx.backend.myStats?.().catch(() => null);
   openModal('Your account', [
-    el('div', { class: 'card', style: 'margin-bottom:10px' },
+    el('button', { class: 'card level-card as-button', style: 'margin-bottom:10px;width:100%;text-align:left', onclick: () => openPoints(ctx, 'progress'), 'aria-label': 'Open points and levels' },
       el('div', { class: 'row between' },
-        el('div', {}, el('div', { style: 'font-family:var(--font-display);font-weight:700;font-size:18px' }, esc(u.alias)), el('div', { class: 'small muted' }, `${level.name}${u.role === 'admin' ? ' · Moderator' : ''}`)),
+        el('div', { class: 'level-badge', 'aria-hidden': 'true' }, String(level.n)),
+        el('div', { style: 'flex:1;min-width:0' }, el('div', { style: 'font-family:var(--font-display);font-weight:700;font-size:18px' }, esc(u.alias)), el('div', { class: 'small muted' }, `Level ${level.n} · ${level.name}${u.role === 'admin' ? ' · Moderator' : ''}`)),
         el('div', { class: 'stat', style: 'text-align:right' }, el('strong', {}, String(u.points)), el('span', {}, 'points'))),
       el('div', { class: 'levelbar' }, el('i', { style: `width:${Math.round(progress * 100)}%` })),
-      el('div', { class: 'small muted' }, next ? `${next.min - u.points} pts to ${next.name}` : 'Max level reached')),
+      el('div', { class: 'small muted' }, next ? `${toNext} pts to ${next.name} · tap for details` : 'Top level reached · tap for details')),
+    el('div', { class: 'row wrap', style: 'margin-bottom:10px' },
+      el('button', { class: 'btn', style: 'flex:1', onclick: () => openPoints(ctx, 'leaderboard') }, '🏆 Leaderboards'),
+      el('button', { class: 'btn', style: 'flex:1', onclick: () => openPoints(ctx, 'guide') }, '❓ How points work')),
     el('div', { class: 'row', style: 'margin-bottom:10px' },
       el('button', { class: 'btn', style: 'flex:1', onclick: () => openFriends(ctx) }, '🫂 Friends & sharing'),
       el('button', { class: 'btn', onclick: () => openAppearance(ctx) }, '🎨 Appearance')),
-    u.role === 'admin' ? el('button', { class: 'btn block', style: 'margin-bottom:10px', onclick: () => openAdmin(ctx) }, '🛠️ Moderation queue') : '',
-    tabBar, tabBody,
+    u.role === 'admin' ? el('button', { class: 'btn block', style: 'margin-bottom:10px', onclick: () => openAdmin(ctx) }, '🛠️ Moderation & points review') : '',
+    stats ? el('p', { class: 'muted small' }, `Today: ${stats.alertsToday}/${RATE_LIMITS.alertsPerDay} reports · ${stats.pathsToday}/${RATE_LIMITS.pathSuggestionsPerDay} path suggestions`) : null,
     el('div', { class: 'row', style: 'margin-top:14px' },
       el('button', { class: 'btn ghost', onclick: async () => { await ctx.backend.signOut(); closeModal(); toast('Signed out'); ctx.showHome(); } }, 'Sign out'),
       ctx.backend.resetDemo ? el('button', { class: 'btn ghost', onclick: () => { if (confirm('Reset all demo data on this device?')) { ctx.backend.resetDemo(); closeModal(); toast('Demo data reset'); ctx.showHome(); } } }, 'Reset demo data') : null),
   ]);
-  show('Points', tabBar.children[0]);
 }
