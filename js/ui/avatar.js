@@ -1,4 +1,4 @@
-// Initial-based avatars. Ghetto Wayz has no photo uploads, so an avatar is the first letter of the alias on a
+// Initial-based avatars. GettoWayz has no photo uploads, so an avatar is the first letter of the alias on a
 // colour picked from the brand palette (stable per alias). Nothing personal is encoded in it.
 import { el } from '../util.js';
 

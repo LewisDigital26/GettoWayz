@@ -1,4 +1,4 @@
-// Basemap — vector tiles (OpenFreeMap, no key) rendered by MapLibre GL inside Leaflet, recoloured to the Ghetto Wayz palette.
+// Basemap — vector tiles (OpenFreeMap, no key) rendered by MapLibre GL inside Leaflet, recoloured to the GettoWayz palette.
 // Falls back to raster OSM tiles (with the CSS dark filter) if WebGL/MapLibre is unavailable.
 /* global L, maplibregl */
 import { config } from './config.js';

@@ -1,6 +1,6 @@
 {
-  "name": "Ghetto Wayz",
-  "short_name": "Ghetto Wayz",
+  "name": "GettoWayz",
+  "short_name": "GettoWayz",
   "description": "Routes for walking, cycling and scooters, with community-added paths and alerts.",
   "start_url": "./",
   "scope": "./",

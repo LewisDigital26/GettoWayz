@@ -1,4 +1,4 @@
-// Ghetto Wayz points policy — the ONE place point values, caps, trip bands, levels and leaderboard
+// GettoWayz points policy — the ONE place point values, caps, trip bands, levels and leaderboard
 // periods are defined.
 //
 // • Demo mode uses these values directly.

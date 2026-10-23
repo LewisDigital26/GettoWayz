@@ -40,7 +40,7 @@ export async function renderFriendsPage(ctx, page) {
   page.setActions();
   if (!state.user) return guestState(ctx, {
     icon: '🫂', title: 'Friends & trip sharing',
-    text: 'Add friends by their Ghetto Wayz ID, then choose — one trip at a time — who can follow your route.',
+    text: 'Add friends by their GettoWayz ID, then choose — one trip at a time — who can follow your route.',
     bullets: ['Nobody sees you unless you accept them as a friend', 'Sharing is always with one friend and time-limited', 'Your live location is never shown without your say-so'],
     action: 'add friends and share trips',
   });
@@ -69,7 +69,7 @@ export async function renderFriendsPage(ctx, page) {
   const idRow = el('div', { class: 'hero idcard' },
     el('div', { class: 'row' }, avatar(state.user.alias, { size: 44 }),
       el('div', { style: 'flex:1;min-width:0' },
-        el('div', { class: 'small muted' }, 'Your Ghetto Wayz ID'),
+        el('div', { class: 'small muted' }, 'Your GettoWayz ID'),
         el('code', { class: 'gwid' }, social.gwId)),
       el('button', { class: 'btn sm', onclick: (e) => copyText(social.gwId, e.currentTarget) }, 'Copy')),
     el('div', { class: 'small', style: 'color:var(--text-3);margin-top:8px' }, 'Share it with people you want to add. It reveals only your alias — never your location, email or points.'));
@@ -154,7 +154,7 @@ function friendsTab(ctx, social, shares) {
               f.sample ? el('button', { class: 'btn sm ghost', onclick: async () => { try { await ctx.backend.demoSimulateIncomingTrip(f.id); ctx.showTab('map'); toast('Sample trip started — this is scripted demo movement, not a real person', 'success'); } catch (e) { toast(e.message, 'error'); } } }, '▶ Simulate their trip') : null,
               el('button', { class: 'btn sm ghost', 'aria-label': `More options for ${esc(f.alias)}`, onclick: () => openFriendOptions(ctx, f) }, '⋯'))));
       }))
-    : el('div', { class: 'empty' }, el('div', { class: 'big', 'aria-hidden': 'true' }, '🫂'), 'No friends yet. Add someone by their Ghetto Wayz ID above.');
+    : el('div', { class: 'empty' }, el('div', { class: 'big', 'aria-hidden': 'true' }, '🫂'), 'No friends yet. Add someone by their GettoWayz ID above.');
 
   return el('div', {},
     el('div', { class: 'field' }, el('label', { for: 'friendIdInput' }, 'Add a friend by ID'), el('div', { class: 'row' }, idInput, find), el('span', { class: 'hint' }, `They must accept before either of you can see the other. Limit ${FRIEND_LIMITS.idLookupsPerHour} searches/hour, ${FRIEND_LIMITS.requestsPerDay} requests/day.`)),

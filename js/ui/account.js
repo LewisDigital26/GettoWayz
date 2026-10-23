@@ -32,7 +32,7 @@ export function colourwayPicker(ctx) {
     el('div', { class: 'sw', style: `background:${c.bg}` }, el('i', { style: `background:${c.a}` }), el('i', { style: `background:${c.b}` }), el('i', { style: `background:${c.c}` })),
     el('div', { class: 't' }, c.name), el('div', { class: 's' }, c.desc))));
   render();
-  return el('div', {}, el('img', { class: 'wordmark', src: 'icons/wordmark.jpg', alt: 'Ghetto Wayz' }), el('h3', { style: 'font-size:14px;margin:0 0 8px' }, 'Colourway'), grid,
+  return el('div', {}, el('img', { class: 'wordmark', src: 'icons/wordmark.jpg', alt: 'GettoWayz' }), el('h3', { style: 'font-size:14px;margin:0 0 8px' }, 'Colourway'), grid,
     el('p', { class: 'small muted', style: 'margin-top:8px' }, 'All three use the logo palette (navy, lime, teal). Your choice is remembered on this device.'));
 }
 export function openAppearance(ctx) { openModal('Appearance', [colourwayPicker(ctx)]); }
@@ -165,7 +165,7 @@ export async function renderProfilePage(ctx, page) {
         el('div', { class: 'hero-name' }, u.alias, u.role === 'admin' ? el('span', { class: 'chip accent', style: 'margin-left:8px;vertical-align:middle' }, 'Moderator') : null),
         el('div', { class: 'hero-sub' }, `Level ${lv.level.n} · ${lv.level.name}`),
         gwId ? el('div', { class: 'row', style: 'gap:6px;margin-top:4px' }, el('code', { class: 'gwid', style: 'font-size:14px' }, gwId),
-          el('button', { class: 'btn sm ghost', style: 'height:30px', 'aria-label': 'Copy your Ghetto Wayz ID', onclick: (e) => { navigator.clipboard?.writeText(gwId).then(() => toast('ID copied')).catch(() => {}); } }, 'Copy')) : null)),
+          el('button', { class: 'btn sm ghost', style: 'height:30px', 'aria-label': 'Copy your GettoWayz ID', onclick: (e) => { navigator.clipboard?.writeText(gwId).then(() => toast('ID copied')).catch(() => {}); } }, 'Copy')) : null)),
     el('div', { class: 'levelbar', role: 'progressbar', 'aria-label': 'Progress to next level', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(lv.progress * 100)), style: 'margin-top:14px' }, el('i', { style: `width:${Math.round(lv.progress * 100)}%` })),
     el('div', { class: 'row between small muted' }, el('span', {}, lv.next ? `${lv.toNext} pts to ${lv.next.name}` : 'Top level reached'), el('span', {}, sum ? `+${sum.week} this week` : '')),
     el('div', { class: 'hero-stats' },

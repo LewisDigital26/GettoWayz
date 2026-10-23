@@ -1,4 +1,4 @@
-// Ghetto Wayz — app entry: wires map, routing, search, navigation and the community screens.
+// GettoWayz — app entry: wires map, routing, search, navigation and the community screens.
 import { config, integrations } from './config.js';
 import { $, $$, el, esc, haversine, distanceToLine, fmtDistance, fmtDuration, bearing, MODES, uid } from './util.js';
 import { state, set, subscribe, selectedRoute } from './state.js';
@@ -362,7 +362,7 @@ function stopWatch() { if (watchId != null) { navigator.geolocation.clearWatch(w
 $('#locateBtn').addEventListener('click', () => {
   if (state.position) { ctx.map.flyTo([state.position.lat, state.position.lng], 16); return; }
   openModal('Use your location?', [
-    el('p', {}, 'Ghetto Wayz uses your location to show where you are, plan routes from here and follow the route while navigating.'),
+    el('p', {}, 'GettoWayz uses your location to show where you are, plan routes from here and follow the route while navigating.'),
     el('p', { class: 'muted small' }, 'Your location stays on this device. We do not store a history of where you go, and your reports never include your live position.'),
     el('div', { class: 'row' }, el('button', { class: 'btn primary', onclick: () => { closeModal(); locate(); } }, 'Allow'), el('button', { class: 'btn', onclick: closeModal }, 'Not now')),
   ]);
@@ -633,7 +633,7 @@ function beginNavigation(r) {
   if (state.position) { onNavTick(state.position); locate({ follow: true }); }
   else {
     openModal('Follow along?', [
-      el('p', {}, 'To follow your progress, Ghetto Wayz needs your location while navigating. Without it, you can still read the directions.'),
+      el('p', {}, 'To follow your progress, GettoWayz needs your location while navigating. Without it, you can still read the directions.'),
       el('div', { class: 'row' }, el('button', { class: 'btn primary', onclick: () => { closeModal(); locate({ follow: true }); } }, 'Use location'), el('button', { class: 'btn', onclick: () => { closeModal(); showStep(0, r); } }, 'Just show steps')),
     ]);
     showStep(0, r);

@@ -1,4 +1,4 @@
--- Ghetto Wayz — Supabase schema
+-- GettoWayz — Supabase schema
 -- Paste this whole file into the Supabase SQL editor and run it once.
 -- Everything security-relevant lives here: row-level security, rate limits, points, sharing access, trip rewards.
 -- The browser only ever uses the anon key + the signed-in user's JWT; RLS and SECURITY DEFINER functions do the rest.

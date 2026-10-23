@@ -1,4 +1,4 @@
-# Ghetto Wayz
+# GettoWayz
 
 A mobile-first, installable (PWA) navigation app for people who walk, cycle or scoot. Plan routes, see community-reported hazards, suggest missing paths, and earn points when moderators approve your contributions.
 
@@ -219,7 +219,7 @@ Five tabs, the same everywhere: **Leaderboard · Friends · Map · Activity · P
 | Tab | What's on it |
 |---|---|
 | Leaderboard | Your rank and points for the chosen board (Everyone / Friends × This week / All-time), top three, full list, who-can-see-me switches, link to the points rules |
-| Friends | “Sharing now” card with Stop, your Ghetto Wayz ID, add by ID, friends, requests, sharing history; *Share a trip* uses the route planned on the map |
+| Friends | “Sharing now” card with Stop, your GettoWayz ID, add by ID, friends, requests, sharing history; *Share a trip* uses the route planned on the map |
 | Map | Search, travel mode, routes, navigation, report / add path, layers and a full map legend |
 | Activity | “Needs you” (friend requests, trip invitations, requested changes) and a feed of trips, points, contributions and sharing, filterable |
 | Profile | Avatar, ID, level and progress, level milestones, contributions, location sharing, privacy, notifications, accessibility, app settings |

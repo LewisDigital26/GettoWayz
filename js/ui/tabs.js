@@ -107,7 +107,7 @@ export function showTab(key, opts = {}) {
     if (refresh || !pages[key].rendered) renderPage(key);
     if (focus && !anchor) requestAnimationFrame(() => pages[key].heading.focus({ preventScroll: true }));
   }
-  document.title = key === 'map' ? 'Ghetto Wayz' : `${pages[key].title} · Ghetto Wayz`;
+  document.title = key === 'map' ? 'GettoWayz' : `${pages[key].title} · GettoWayz`;
   // history
   const url = urlFor(key);
   const write = () => {
