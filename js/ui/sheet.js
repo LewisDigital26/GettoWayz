@@ -12,7 +12,7 @@ export function isCollapsed() { return sheet.classList.contains('collapsed'); }
 export function hideSheet(h) { sheet.hidden = !!h; syncHeight(); }
 
 function syncHeight() {
-  const h = sheet.hidden ? 0 : (isCollapsed() ? 64 : Math.min(sheet.offsetHeight, window.innerHeight * .72));
+  const h = sheet.hidden ? 0 : (isCollapsed() ? 64 : Math.min(sheet.offsetHeight, (sheet.parentElement?.clientHeight || window.innerHeight) * .72));
   document.documentElement.style.setProperty('--sheet-h', `${h}px`);
 }
 window.addEventListener('resize', syncHeight);
