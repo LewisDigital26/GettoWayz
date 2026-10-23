@@ -195,6 +195,13 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
 .sheet-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
 .sheet-title h2 { font-size: 18px; }
 
+/* ---------- Quick finds (home sheet) ---------- */
+.quick-label { font-size: 12px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--text-3); margin: 2px 0 6px; }
+.quick-finds { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -16px 12px; padding: 0 16px 2px; }
+.quick-finds::-webkit-scrollbar { display: none; }
+.quick-finds .btn.quick { flex: 0 0 auto; border-radius: 999px; white-space: nowrap; }
+@media (min-width: 900px) { .quick-finds { flex-wrap: wrap; overflow: visible; margin: 0 0 12px; padding: 0; } }
+
 /* ---------- Route cards ---------- */
 .route-list { display: flex; flex-direction: column; gap: 8px; margin: 8px 0 12px; }
 .route-card {

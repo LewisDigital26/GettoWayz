@@ -63,7 +63,9 @@ export class VectorBasemap {
     paint('background', 'background-color', p.bg);
     if (has('natural_earth')) paint('natural_earth', 'raster-opacity', 0);
     each(/^landuse_/, (id) => { paint(id, 'fill-color', p.land); paint(id, 'fill-opacity', .6); });
-    each(/^landcover_(grass|wetland|sand|ice)$/, (id) => { paint(id, 'fill-color', p.park); paint(id, 'fill-opacity', .4); });
+    each(/^landcover_(grass|sand|ice)$/, (id) => { paint(id, 'fill-color', p.park); paint(id, 'fill-opacity', .4); });
+    // Wetland in the vendor style is a hatched pattern that looks muddy on the dark palette — flatten it to a plain tint.
+    each(/^landcover_wetland/, (id) => { try { gl.setPaintProperty(id, 'fill-pattern', undefined); } catch { /* ignore */ } paint(id, 'fill-color', p.park); paint(id, 'fill-opacity', .35); });
     paint('landcover_wood', 'fill-color', p.wood); paint('landcover_wood', 'fill-opacity', .55);
     paint('park', 'fill-color', p.park); paint('park', 'fill-opacity', .55);
     paint('park_outline', 'line-color', p.wood);
