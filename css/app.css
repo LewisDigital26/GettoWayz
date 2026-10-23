@@ -84,6 +84,10 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
 .map { position: absolute; inset: 0; background: #11131a; }
 .leaflet-container { background: #11131a; font-family: var(--font-body); }
 .leaflet-tile-pane { filter: var(--map-filter); }
+/* Vector basemap (MapLibre) is recoloured in JS, so no CSS filter; keep the GL canvas behind every overlay. */
+.map.vector .leaflet-tile-pane { filter: none; }
+.map.vector .leaflet-gl-layer { z-index: 1; }
+.map.vector .maplibregl-canvas { outline: none; }
 .leaflet-control-attribution {
   background: rgba(11,12,16,.75) !important; color: var(--text-2) !important;
   font-size: 10px; backdrop-filter: blur(6px); padding: 2px 6px;
@@ -184,8 +188,8 @@ h1, h2, h3 { font-family: var(--font-display); letter-spacing: -0.01em; margin: 
   max-height: 72vh; display: flex; flex-direction: column;
   padding-bottom: var(--sab-map); transition: transform .25s ease;
 }
-.sheet.collapsed { transform: translateY(calc(100% - 78px - var(--sab-map))); }
-.sheet-handle { padding: 12px 0 8px; display: grid; place-items: center; cursor: grab; touch-action: none; }
+.sheet.collapsed { transform: translateY(calc(100% - 64px - var(--sab-map))); }
+.sheet-handle { padding: 10px 0 6px; display: grid; place-items: center; cursor: grab; }
 .sheet-handle span { width: 42px; height: 5px; border-radius: 3px; background: var(--line); }
 .sheet-content { overflow-y: auto; padding: 0 16px 16px; overscroll-behavior: contain; }
 .sheet-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 8px; }
@@ -336,6 +340,11 @@ table.rules td:last-child { text-align: right; font-weight: 700; color: var(--ac
 .gw-pin.alert { background: var(--bg-2); }
 .gw-pin.alert.verified { border-color: var(--verified); }
 .gw-pin.alert.pending { border-color: var(--pending); }
+.gw-pin.traffic { background: #2a2d3a; border-color: #ffb020; }
+.gw-pin.traffic.closed { border-color: #ff4d4f; }
+.flow-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
+.flow-dot.free { background: #3fbf5f; } .flow-dot.slow { background: #ffb020; } .flow-dot.jam { background: #ff4d4f; }
+.traffic-tiles { opacity: .75; }
 .gw-me { width: 18px; height: 18px; border-radius: 50%; background: var(--teal); border: 3px solid #fff; box-shadow: 0 0 0 8px color-mix(in srgb, var(--teal) 30%, transparent); }
 .gw-vertex { width: 14px; height: 14px; border-radius: 50%; background: var(--accent); border: 2px solid #0b0c10; }
 .leaflet-popup-content-wrapper { background: var(--bg-2); color: var(--text); border-radius: 12px; box-shadow: var(--shadow); }
@@ -347,7 +356,7 @@ table.rules td:last-child { text-align: right; font-weight: 700; color: var(--ac
 /* ---------- Desktop ---------- */
 @media (min-width: 900px) {
   .sheet { left: 16px; right: auto; bottom: 16px; width: 400px; border-radius: 22px; max-height: calc(100vh - 100px); }
-  .sheet.collapsed { transform: translateY(calc(100% - 78px)); }
+  .sheet.collapsed { transform: translateY(calc(100% - 64px)); }
   .fabs { bottom: 24px; }
   .modal { align-items: center; }
   .modal-card { border-radius: 22px; }
@@ -708,11 +717,3 @@ ol.lb-list { list-style: none; padding: 0; margin: 0; }
 }
 .idcard .gwid { font-size: 20px; white-space: nowrap; display: block; overflow: hidden; text-overflow: ellipsis; }
 @media (max-width: 420px) { html.large-text .tab-label:has(.lbl-short) .lbl-long { display: none; } html.large-text .lbl-short { display: inline; } }
-
-/* Draggable sheet: follows the finger while dragging, snaps with an ease after */
-.sheet-title { touch-action: none; cursor: grab; }
-.sheet-title button, .sheet-title a { cursor: pointer; }
-.sheet.dragging { transition: none; cursor: grabbing; }
-.sheet-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 12px; }
-.sheet.collapsed .sheet-content { overflow: hidden; }
-.sheet.collapsed .sheet-content > :not(.sheet-title) { visibility: hidden; }
