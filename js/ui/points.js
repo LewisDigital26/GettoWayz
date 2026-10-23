@@ -169,12 +169,12 @@ async function leaderboardTab(ctx) {
         offset < total ? el('button', { class: 'btn sm ghost block', style: 'margin-top:6px', onclick: (e) => { e.target.disabled = true; load(true); } }, `Show more (${total - offset} more)`) : null,
         !onPage && page.me ? el('div', { style: 'margin-top:8px' }, el('div', { class: 'small muted', style: 'margin-bottom:4px' }, 'Your position'), row(page.me)) : null,
         !page.me && !append ? el('div', { class: 'notice', style: 'margin-top:8px' }, lbState.scope === 'public'
-          ? (sum.leaderboardOptIn ? (lbState.period === 'week' ? 'You will appear here once you earn points this week.' : 'You will appear here once you have points.') : 'You are hidden from public leaderboards. Turn it on above if you want to join in.')
-          : 'Friends only see you if you turn on “Friends leaderboard” above.') : null].filter(Boolean));
+          ? (sum.leaderboardOptIn ? (lbState.period === 'week' ? 'You will appear here once you earn points this week.' : 'You will appear here once you have points.') : 'You are hidden from public leaderboards. Turn it on under “Who can see me” below if you want to join in.')
+          : 'Friends only see you if you turn on “Friends leaderboard” below.') : null].filter(Boolean));
     } catch (e) { table.replaceChildren(errorBox(e, () => load())); }
   }
-  wrap.append(seg, periodNote, table, foot, privacy,
-    !ctx.backend.isShared ? el('p', { class: 'small muted', style: 'margin-top:8px' }, 'Demo mode: leaderboards only include sample users and accounts created on this device.') : null);
+  wrap.append(...[seg, periodNote, table, foot, privacy,
+    !ctx.backend.isShared ? el('p', { class: 'small muted', style: 'margin-top:8px' }, 'Demo mode: leaderboards only include sample users and accounts created on this device.') : null].filter(Boolean));
   load();
   return wrap;
 }
