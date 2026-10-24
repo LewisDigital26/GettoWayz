@@ -10,7 +10,7 @@ const root = join(here, '..', '..');       // repo root = the website
 const out = join(here, '..', 'www');       // what Capacitor packs into the apps
 
 // Everything the site needs at runtime. Anything not listed (apps/, supabase/, README…) stays out of the apps.
-const WEB = ['index.html', 'manifest.webmanifest', 'sw.js', 'config.local.js', 'css', 'js', 'icons'];
+const WEB = ['index.html', 'manifest.webmanifest', 'sw.js', 'config.local.js', 'css', 'js', 'icons', 'data'];
 
 rmSync(out, { recursive: true, force: true });
 mkdirSync(out, { recursive: true });

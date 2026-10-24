@@ -56,6 +56,48 @@ export class OverpassStreetlightProvider {
   }
 }
 
+/**
+ * Lamp positions from a snapshot file shipped with the app (data/coventry-lamps.json), refreshed weekly by
+ * a GitHub Action (scripts/fetch-lamps.mjs). Instant and works when Overpass is down. Areas outside the
+ * snapshot's box fall back to live Overpass. A council FOI dataset can later replace the file as-is.
+ */
+export class SnapshotStreetlightProvider {
+  constructor(url = 'data/coventry-lamps.json', fallback = null) {
+    this.name = 'snapshot';
+    this.isLive = true;
+    this.url = url;
+    this.fallback = fallback;
+    this.note = 'Lamp positions from OpenStreetMap (mapped by volunteers; coverage varies by area). Working status comes only from community reports.';
+    this.data = null;      // { bbox, updated, lamps: Lamp[] }
+    this.loading = null;
+  }
+  load() {
+    this.loading ||= fetch(this.url, { cache: 'no-cache' })
+      .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
+      .then((j) => {
+        const lamps = (j.lamps || []).map(([lat, lng, id, ref]) => ({ id: 'osm-' + id, lat, lng, source: 'osm', ref: ref || null }));
+        this.data = { bbox: j.bbox, updated: j.updated, lamps };
+        if (j.updated) this.note = `Lamp positions from OpenStreetMap, updated ${new Date(j.updated).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })} (mapped by volunteers; coverage varies). Working status comes only from community reports.`;
+        return this.data;
+      })
+      .catch((e) => { this.loading = null; throw e; });   // allow a retry on the next view change
+    return this.loading;
+  }
+  covers(b) {
+    const x = this.data?.bbox;
+    return !!x && b.south >= x.south && b.north <= x.north && b.west >= x.west && b.east <= x.east;
+  }
+  async fetchLamps(b) {
+    let data = null;
+    try { data = await this.load(); } catch { /* snapshot missing → live fallback */ }
+    if (data && this.covers(b)) {
+      return data.lamps.filter((l) => l.lat >= b.south && l.lat <= b.north && l.lng >= b.west && l.lng <= b.east);
+    }
+    if (this.fallback) return this.fallback.fetchLamps(b);
+    throw new Error('Lamp positions are only available around Coventry for now.');
+  }
+}
+
 /** Sample lamps — DEMO ONLY. Points are generated along the sample routes and clearly labelled; they are not real lamp locations. */
 export class SampleStreetlightProvider {
   constructor() {
@@ -89,7 +131,9 @@ export function createStreetlightProvider() {
   const src = config.STREETLIGHT_SOURCE;
   if (src === 'none') return null;
   if (src === 'sample') return new SampleStreetlightProvider();
-  return new OverpassStreetlightProvider(config.OVERPASS_URL);
+  if (src === 'overpass-live') return new OverpassStreetlightProvider(config.OVERPASS_URL);
+  // Default ('overpass' / 'osm'): OpenStreetMap lamps from the shipped snapshot, live Overpass only outside its area.
+  return new SnapshotStreetlightProvider(config.STREETLIGHT_SNAPSHOT_URL || 'data/coventry-lamps.json', new OverpassStreetlightProvider(config.OVERPASS_URL));
 }
 
 /**

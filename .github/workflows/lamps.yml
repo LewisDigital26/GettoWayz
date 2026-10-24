@@ -1,0 +1,34 @@
+name: Refresh streetlight snapshot
+
+# Re-downloads Coventry's streetlights from OpenStreetMap every Monday morning and commits
+# data/coventry-lamps.json if anything changed. Can also be run by hand from the Actions tab.
+on:
+  schedule:
+    - cron: '17 4 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Download lamps
+        run: node scripts/fetch-lamps.mjs
+      - name: Commit if changed
+        run: |
+          if git diff --quiet -- data/coventry-lamps.json && git ls-files --error-unmatch data/coventry-lamps.json >/dev/null 2>&1; then
+            echo "No change"; exit 0
+          fi
+          git config user.name "gettowayz-bot"
+          git config user.email "actions@users.noreply.github.com"
+          git add data/coventry-lamps.json
+          git commit -m "Refresh streetlight snapshot"
+          git pull --rebase origin main
+          git push origin HEAD:main
