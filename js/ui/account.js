@@ -146,7 +146,8 @@ export async function renderProfilePage(ctx, page) {
           el('button', { class: 'btn primary', onclick: () => openAuth(ctx, 'signin') }, 'Sign in'),
           el('button', { class: 'btn', onclick: () => openAuth(ctx, 'register') }, 'Create account'))),
       ...deviceSettings(ctx),
-      group('set-app', 'About', setRow('📜', 'How points work', 'Rules, trip checks and levels', null, { onclick: () => openGuide(ctx) })),
+      group('set-app', 'About', setRow('📜', 'How points work', 'Rules, trip checks and levels', null, { onclick: () => openGuide(ctx) }),
+        setRow('📥', 'Offline maps', 'Save map areas to use with no signal', null, { onclick: () => ctx.openOfflineMaps() })),
       el('p', { class: 'small', style: 'color:var(--text-3);margin:14px 2px 0' }, 'Route labels describe what a route is built from — they are not safety ratings.'));
   }
   const u = state.user;
@@ -245,6 +246,7 @@ export async function renderProfilePage(ctx, page) {
   const app = group('set-app', 'App',
     setRow('📜', 'How points work', 'Rules, trip checks, levels and leaderboards', null, { onclick: () => openGuide(ctx) }),
     setRow('✍️', 'My reviews', 'Places you have reviewed in Explore', null, { onclick: () => openMyReviews(ctx) }),
+    setRow('📥', 'Offline maps', 'Save map areas to use with no signal', null, { onclick: () => ctx.openOfflineMaps() }),
     u.role === 'admin' ? setRow('🛠️', 'Moderation & points review', 'Review reports, paths, held trips and reversals', null, { onclick: () => openAdmin(ctx) }) : null,
     u.role === 'admin' ? setRow('➕', 'Add test points', 'Moderators: add or remove points for any user (logged)', null, { onclick: () => openAdmin(ctx, { focus: 'grant' }) }) : null,
     ctx.backend.resetDemo ? setRow('♻️', 'Reset demo data', 'Clears everything stored on this device', null, { onclick: () => { if (confirm('Reset all demo data on this device?')) { ctx.backend.resetDemo(); toast('Demo data reset'); ctx.showHome(); ctx.refreshPage(); } } }) : null,

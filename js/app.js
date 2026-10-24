@@ -31,6 +31,8 @@ import { initTabs, registerPage, setBadge, updateProfileTab } from './ui/tabs.js
 import { prefs, setPref, applyPrefs } from './prefs.js';
 import { openSafety, openArrivalTimer, safetyWatch, autoCheckIn, askNotifications } from './ui/safety.js';
 import { pathFreshness } from './ui/paths.js';
+import { openOfflineMaps } from './ui/offline.js';
+import { snapshotCommunity, loadCommunitySnapshot, coveredBy, listPacks } from './offline.js';
 
 // ---------- services ----------
 export const ctx = {
@@ -108,7 +110,24 @@ showHome();
 if (!ctx.backend.isShared) statusStrip('Demo mode · data is stored on this device only and is not shared');
 window.addEventListener('online', () => set({ online: true }));
 window.addEventListener('offline', () => set({ online: false }));
-subscribe((_, patch) => { if ('online' in patch) toast(state.online ? 'Back online' : 'You are offline — search and live routing are unavailable', state.online ? 'success' : 'error'); });
+const demoNote = () => (!ctx.backend.isShared ? 'Demo mode · data is stored on this device only and is not shared' : '');
+function offlineStrip() {
+  if (state.online) { statusStrip(demoNote()); return; }
+  const c = ctx.map.center(), pack = coveredBy(c[0], c[1]);
+  statusStrip(pack ? `Offline · showing your saved map "${pack.name}". Routing and search need a connection.`
+    : listPacks().length ? 'Offline · this part of the map isn\'t saved. Routing and search need a connection.'
+    : 'Offline · no saved map areas yet (Profile › Offline maps). Routing and search need a connection.');
+}
+subscribe((_, patch) => {
+  if (!('online' in patch)) return;
+  toast(state.online ? 'Back online' : 'You are offline — search and live routing are unavailable', state.online ? 'success' : 'error');
+  offlineStrip();
+  if (state.online) refreshData();
+});
+ctx.map.map.on('moveend', () => { if (!state.online) offlineStrip(); });
+ctx.openOfflineMaps = () => openOfflineMaps(ctx);
+$('#offlineMapsBtn').addEventListener('click', () => { $('#layersPanel').hidden = true; openOfflineMaps(ctx); });
+if (!state.online) offlineStrip();
 
 // ---------- sharing data ----------
 let lastShareIds = '';
@@ -182,7 +201,12 @@ async function refreshAlerts() {
   } catch { /* offline: keep what we have */ } finally { alertsBusy = false; }
 }
 async function refreshData() {
-  const [alerts, paths] = await Promise.all([ctx.backend.listAlerts().catch(() => []), ctx.backend.listPaths().catch(() => [])]);
+  let failed = false;
+  let [alerts, paths] = await Promise.all([ctx.backend.listAlerts().catch(() => { failed = true; return []; }), ctx.backend.listPaths().catch(() => { failed = true; return []; })]);
+  // Offline (or the server is unreachable): fall back to the last community data saved on this device.
+  const snap = failed ? loadCommunitySnapshot() : null;
+  if (snap) { if (!alerts.length) alerts = snap.alerts; if (!paths.length) paths = snap.paths; ctx.communityFrom = snap.at; }
+  else if (!failed) { snapshotCommunity({ alerts, paths }); ctx.communityFrom = null; }
   if (ctx.backend.cacheAliases) await ctx.backend.cacheAliases([...alerts.map((a) => a.createdBy), ...paths.map((p) => p.createdBy)]);
   knownAlertIds = new Set(alerts.map((a) => a.id));
   set({ alerts, paths });

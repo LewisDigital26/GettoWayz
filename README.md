@@ -121,6 +121,16 @@ The 🛡️ button (map controls, home sheet, route sheet and the navigation bar
 - **Profile › Badges & streak**: 13 badges (first trip, 10/50 trips, 10/100 km, 3/7-day streaks, all-rounder, hazard hunter, lamp lighter, path maker, cartographer, path checker) and your current/best streak — days in a row (UK time) with a verified trip. In live mode `my_badges()` works them out in SQL from verified trips, awarded points and path checks, so they can't be faked; nothing is stored and badges never earn points.
 - **Trip cards**: after a trip, *📸 Share trip card* draws a picture (distance, time, mode, points, streak, climb, your alias) to share or save. It never shows the route or a map; the destination is off unless you tick *Show where I went*.
 
+### Offline maps
+
+Profile › **Offline maps** (or map layers ⧉ › 📥 Offline maps) saves an area to use with no signal: *this map view*, *about 3 km around me* or *all of Coventry* (~13 MB). It shows the size before downloading, a progress bar, and a list of saved areas with Show / Delete.
+
+- **What's saved** (`js/offline.js`, Cache Storage `gw-offline-map-v1`): OpenFreeMap vector tiles for the area at zoom 10–14 (the map over-zooms for street level), plus the style, tile index, icons, Latin fonts and UK shaded relief. Max 2,500 tiles per area; 6 downloads at a time to stay polite to the free tile server.
+- **How it's used** (`sw.js`): map data is network-first. If the network fails or takes over 4 s and the tile is saved, the saved copy is shown. Saved tiles refresh themselves while you're online. Cache keys drop OpenFreeMap's weekly data version, so packs keep working after their data updates.
+- **The app itself opens offline**: Leaflet, MapLibre, supabase-js and the fonts are now cached on first use (versioned CDN URLs, cache-first), as are the lamp / lit-street snapshots.
+- **Community data**: the last approved paths and active alerts are kept on the device and shown when offline.
+- **Offline banner** says whether the area you're looking at is saved. Routing and search still need a connection.
+
 ### Scooter mode
 
 No public routing engine has a scooter profile. Scooter mode uses the cycling network with scooter speed estimates and says so in the route basis. Check local rules on where e-scooters may be ridden.
