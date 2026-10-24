@@ -5,7 +5,7 @@ import { state, set, subscribe, selectedRoute } from './state.js';
 import { GwMap } from './map.js';
 import { createRoutingProvider } from './providers/routing.js';
 import { createGeocoder, searchSamplePlaces, reverseGeocode } from './providers/geocoding.js';
-import { QUICK_FINDS, findNearby } from './providers/nearby.js';
+import { QUICK_FINDS, findNearby, prefetchNearby } from './providers/nearby.js';
 import { SAMPLE_PLACES } from './providers/sampleData.js';
 import { createBackend } from './backend/index.js';
 import { ALERT_CATEGORIES } from './backend/rules.js';
@@ -195,6 +195,7 @@ function showHome({ keepState = false } = {}) {
   hideSheet(false); if (!keepState) collapse(false);
   const live = integrations.routing !== 'sample';
   const nearby = state.alerts.length;
+  if (state.online) prefetchNearby(state.position ? [state.position.lat, state.position.lng] : ctx.map.center());
   renderSheet([
     el('div', { class: 'sheet-title' },
       el('h2', {}, 'Where you headed?'),
@@ -237,7 +238,7 @@ async function showNearby(cat) {
             el('div', { class: 't' }, p.name),
             el('div', { class: 's' }, p.sub || cat.label),
             el('div', { class: 'meta' }, el('span', { class: 'chip' }, fmtDistance(p.dist)))))))
-      : el('div', { class: 'empty' }, el('div', { class: 'big' }, cat.emoji), `Nothing tagged as ${cat.label.toLowerCase()} within 1.5 km on OpenStreetMap.`),
+      : el('div', { class: 'empty' }, el('div', { class: 'big' }, cat.emoji), `Nothing tagged as ${cat.label.toLowerCase()} within 1 km on OpenStreetMap.`),
     el('p', { class: 'small muted', style: 'margin-top:8px' }, 'Results © OpenStreetMap contributors. Tap one to route there.'),
   ]);
 }
