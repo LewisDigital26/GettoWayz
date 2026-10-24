@@ -9,6 +9,7 @@ import { toast } from './sheet.js';
 import { avatar } from './avatar.js';
 import { openAccount, openAuth } from './account.js';
 import { motionOk } from '../prefs.js';
+import { openTripCard } from './tripCard.js';
 
 const MODE_LABEL = { walk: '🚶 Walk', bike: '🚲 Bike', scooter: '🛴 Scooter', drive: '🚗 Drive' };
 const ENTRY_STATUS = {
@@ -238,16 +239,22 @@ async function guideTab(ctx) {
 }
 
 /** Post-trip result (called only after navigation has ended). */
-export function showTripResult(res) {
+/** info (optional): trip facts for the shareable card — { mode, distanceM, durationS, streak, ascentM, destName, alias } */
+export function showTripResult(res, info = null) {
   if (!res) return;
   const pts = (res.basePoints || 0) + (res.distancePoints || 0);
+  const cardBtn = info ? el('button', { class: 'btn block', style: 'margin-top:12px', onclick: () => openTripCard({ ...info, points: pts || null }) }, '📸 Share trip card') : null;
   if (res.outcome === 'completed' && pts > 0) {
     openModal('Trip verified', [
       el('div', { class: 'trip-result' }, el('div', { class: 'big' }, `+${pts}`), el('div', { class: 'muted' }, 'points')),
+      info?.streak > 1 ? el('div', { class: 'notice info', style: 'margin:8px 0' }, `🔥 ${info.streak}-day streak — trip again tomorrow to keep it going.`) : null,
       el('table', { class: 'rules' },
         el('tr', {}, el('td', {}, 'Completed trip'), el('td', {}, `+${res.basePoints}`)),
         res.distancePoints ? el('tr', {}, el('td', {}, `Distance bonus (~${fmtDistance(res.eligibleM)})`), el('td', {}, `+${res.distancePoints}`)) : null),
-      ...(res.reasons || []).map((r) => el('div', { class: 'notice', style: 'margin-top:8px' }, esc(r)))]);
+      ...(res.reasons || []).map((r) => el('div', { class: 'notice', style: 'margin-top:8px' }, esc(r))),
+      cardBtn]);
+  } else if (info && res.outcome === 'completed') {
+    openModal('Trip complete', [el('p', {}, esc(res.reasons?.[0] || 'Nice one.')), cardBtn]);
   } else if (res.outcome === 'review') {
     toast('Trip saved — a moderator will check it before any points are added', 'success');
   } else if (res.outcome === 'completed') {

@@ -762,3 +762,27 @@ ol.lb-list { list-style: none; padding: 0; margin: 0; }
 .sheet-handle:focus-visible { outline: 2px solid var(--accent); outline-offset: -4px; border-radius: 12px; }
 .sheet.collapsed .sheet-content { overflow: hidden; }
 .sheet.collapsed .sheet-content > :not(.sheet-title) { visibility: hidden; }
+
+/* ---------- v10: access tags, safety, badges, trip card ---------- */
+.access-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; }
+.access-opt { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 500; }
+@media (max-width: 380px) { .access-grid { grid-template-columns: 1fr; } }
+.chip.danger { color: #ff4d4f; border-color: #ff4d4f; }
+.sharepill.sos { border-color: #ff4d4f; } .sharepill.sos .dot { background: #ff4d4f; }
+.iconbtn.safety { font-size: 18px; line-height: 1; }
+.safety-option { display: flex; gap: 12px; align-items: center; width: 100%; text-align: left; padding: 12px; margin-bottom: 8px;
+  background: var(--bg-3); border: 1px solid var(--line); border-radius: 14px; color: inherit; font: inherit; cursor: pointer; }
+.safety-option .big { font-size: 28px; }
+.safety-option.sos { border-color: #ff4d4f; }
+a.btn { text-decoration: none; }
+.streak-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.streak { background: var(--bg-2); border-radius: 14px; padding: 10px 12px; display: flex; flex-direction: column; }
+.streak strong { font-size: 22px; font-family: Syne, system-ui, sans-serif; }
+.streak span { font-size: 12px; color: var(--text-2); }
+.badge-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 8px; }
+.badge { background: var(--bg-2); border: 1px solid var(--line); border-radius: 14px; padding: 10px; text-align: center; opacity: .6; }
+.badge.got { opacity: 1; border-color: var(--accent); }
+.badge .be { font-size: 28px; }
+.badge .bn { font-weight: 700; font-size: 13px; margin-top: 4px; }
+.badge .bd { font-size: 11px; color: var(--text-2); margin-top: 2px; }
+.tripcard-canvas { width: 100%; height: auto; border-radius: 16px; display: block; }

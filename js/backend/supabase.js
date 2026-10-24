@@ -82,14 +82,35 @@ export class SupabaseBackend {
   async reviewAlert(id, decision) { await this.rpc('review_alert', { p_alert: id, p_decision: decision }); await this.loadProfile(this.profile?.id); this.emit(); }
 
   // ---------- paths ----------
-  rowToPath(p) { return { id: p.id, name: p.name, type: p.type, surface: p.surface, note: p.note, points: p.points, status: p.status, createdBy: p.created_by, createdAt: p.created_at, reviewedAt: p.reviewed_at, reviewMessage: p.review_message }; }
+  rowToPath(p, confs = []) {
+    const mine = confs.filter((c) => c.path_id === p.id);
+    return { id: p.id, name: p.name, type: p.type, surface: p.surface, note: p.note, points: p.points, status: p.status, createdBy: p.created_by, createdAt: p.created_at, reviewedAt: p.reviewed_at, reviewMessage: p.review_message,
+      access: p.access || {}, confirmations: mine.map((c) => ({ userId: c.user_id, at: c.at, stillOk: c.still_ok !== false })) };
+  }
   async listPaths({ status } = {}) {
     let q = this.sb.from('paths').select('*').order('created_at', { ascending: false });
     if (status) q = q.eq('status', status);
-    const { data, error } = await q; if (error) throw wrap(error);
-    return (data || []).map((p) => this.rowToPath(p));
+    // path_confirmations arrives with migration-010; without it paths simply have no confirmations
+    const [{ data, error }, confs] = await Promise.all([q, this.sb.from('path_confirmations').select('path_id,user_id,at,still_ok').then((r) => r.data || [], () => [])]);
+    if (error) throw wrap(error);
+    return (data || []).map((p) => this.rowToPath(p, confs));
   }
-  async suggestPath({ name, type, surface, note, points }) { const p = await this.rpc('suggest_path', { p_name: name, p_type: type, p_surface: surface, p_note: note, p_points: points.map(([a, b]) => [+a.toFixed(5), +b.toFixed(5)]) }); this.emit(); return this.rowToPath(p); }
+  async suggestPath({ name, type, surface, note, points, access = {} }) {
+    const args = { p_name: name, p_type: type, p_surface: surface, p_note: note, p_points: points.map(([a, b]) => [+a.toFixed(5), +b.toFixed(5)]) };
+    let p;
+    try { p = await this.rpc('suggest_path', { ...args, p_access: access }); }
+    catch (e) { if (!/function|p_access|schema cache/i.test(e.message)) throw e; p = await this.rpc('suggest_path', args); } // migration-010 not run yet
+    this.emit(); return this.rowToPath(p);
+  }
+  async confirmPath(id, stillOk = true) {
+    try { await this.rpc('confirm_path', { p_path: id, p_still_ok: !!stillOk }); }
+    catch (e) { if (/function|schema cache/i.test(e.message)) throw new BackendError('setup', 'Path confirmations need supabase/migration-010 on the server.'); throw e; }
+    this.emit();
+  }
+  async myBadges() {
+    try { return await this.rpc('my_badges', {}); }
+    catch (e) { if (/function|schema cache/i.test(e.message)) return null; throw e; } // null = migration-010 not run
+  }
   async reviewPath(id, decision, message = '') { await this.rpc('review_path', { p_path: id, p_decision: decision, p_message: message }); this.emit(); }
 
   // ---------- points (all awards are calculated server-side; see migration-004-points.sql) ----------
@@ -226,7 +247,8 @@ export class SupabaseBackend {
     for (const v of views) if (v.trip && v.status !== 'ended' && this.routeCache.has(v.id)) v.trip.geometry = this.routeCache.get(v.id);
     return views;
   }
-  async startLocationShare(friendId, minutes) { const s = await this.rpc('start_share', { p_to: friendId, p_minutes: minutes, p_type: 'location', p_trip: null }); this.emit(); return this.shareView(s); }
+  /** extra: optional { safety: { dueAt } } (arrival timer) or { sos: true } (quick share) — stored on the share row, visible only to the two people. */
+  async startLocationShare(friendId, minutes, extra = null) { const s = await this.rpc('start_share', { p_to: friendId, p_minutes: minutes, p_type: 'location', p_trip: extra }); this.emit(); return this.shareView(s); }
   async startTripShare(friendId, { destName, mode, geometry, durationS, live = false, toFriendLocation = false }) {
     this.requireUser();
     const g = geometry.map(([a, b]) => [+a.toFixed(6), +b.toFixed(6)]);

@@ -32,6 +32,7 @@ export const CATEGORIES = [
   { key: 'bikeshop',   group: 'shops',    label: 'Bike shops',  emoji: '🚲',  quick: false, match: { shop: ['bicycle'] } },
   { key: 'barber',     group: 'shops',    label: 'Barbers & hair', emoji: '💈', quick: false, match: { shop: ['hairdresser', 'barber', 'beauty'] } },
 
+  { key: 'bikepark',   group: 'services', label: 'Bike parking', emoji: '🅿️', quick: false, match: { amenity: ['bicycle_parking'] } },
   { key: 'cash',       group: 'services', label: 'Cash',        emoji: '💷',  quick: true,  match: { amenity: ['atm', 'bank'] } },
   { key: 'petrol',     group: 'services', label: 'Petrol',      emoji: '⛽',  quick: true,  match: { amenity: ['fuel'] } },
   { key: 'charging',   group: 'services', label: 'EV charging', emoji: '🔌',  quick: false, match: { amenity: ['charging_station'] } },

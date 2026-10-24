@@ -1,6 +1,7 @@
 // Explore nearby — browse OpenStreetMap places by category, see them on the map, open a place sheet with
 // directions, OSM facts and community reviews. Reviews never earn points (see backend / migration-008).
-import { el, esc, fmtDistance, fmtAgo } from '../util.js';
+import { el, esc, fmtDistance, fmtAgo, haversine } from '../util.js';
+import { openReportFlow } from './alerts.js';
 import { state } from '../state.js';
 import { CATEGORIES, CATEGORY_MAP, GROUPS, QUICK, searchPlaces, fetchPlace, enrichPlace, placeFacts } from '../providers/places.js';
 import { renderSheet, collapse, hideSheet, toast } from './sheet.js';
@@ -98,12 +99,18 @@ export async function openPlace(ctx, place) {
     if (state.destination) return; // user moved on
   }
   const facts = placeFacts(place.tags);
+  // Bike parking: show recent theft reports right here, and let people add one
+  const thefts = place.cat === 'bikepark' ? state.alerts.filter((a) => a.category === 'bike_theft' && haversine([a.lat, a.lng], [place.lat, place.lng]) < 60) : [];
+  const bikeBlock = place.cat === 'bikepark' ? el('div', { class: `notice ${thefts.length ? 'warn' : 'info'}`, style: 'margin-bottom:10px' },
+    thefts.length ? `🔓 ${thefts.length} bike theft report${thefts.length > 1 ? 's' : ''} near here recently — use a good D-lock through the frame.` : 'No bike theft reports here recently.',
+    el('div', { style: 'margin-top:8px' }, el('button', { class: 'btn sm', onclick: () => requireSignIn(ctx, 'report a bike theft') && openReportFlow(ctx, [place.lat, place.lng], { preset: 'bike_theft' }) }, '🔓 Report a theft here'))) : null;
   renderSheet([
     head(),
     el('div', { class: 'muted small', style: 'margin:-4px 0 8px' }, [place.sub, place.dist != null ? `${fmtDistance(place.dist)} from ${hereLabel()}` : null].filter(Boolean).join(' · ')),
     el('div', { class: 'row wrap', style: 'margin-bottom:10px' },
       el('button', { class: 'btn primary', onclick: () => { clearExplore(ctx); ctx.setDestination({ id: place.id, name: place.name, sub: place.sub, lat: place.lat, lng: place.lng, source: 'osm' }); } }, '➜ Directions'),
       el('button', { class: 'btn', onclick: () => requireSignIn(ctx, 'write a review') && openReviewForm(ctx, place, null, () => openPlace(ctx, place)) }, '✍️ Write a review')),
+    bikeBlock,
     facts.length ? el('div', { class: 'facts' }, ...facts.map((f) => el('div', { class: 'fact' },
       el('span', { class: 'ico', 'aria-hidden': 'true' }, f.ico),
       el('div', {}, el('div', { class: 'k' }, f.label), f.href ? el('a', { href: f.href, target: '_blank', rel: 'noopener' }, f.value) : el('div', {}, f.value)))))

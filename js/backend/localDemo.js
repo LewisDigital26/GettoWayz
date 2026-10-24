@@ -8,6 +8,10 @@ import { ALERT_CATEGORIES, RATE_LIMITS, CONFIRMATIONS_TO_AUTO_FLAG } from './rul
 import { pointsMethods, ALERT_AWARD_RULE } from './demoPoints.js';
 import { STREET_CONFIRMATIONS_TO_AWARD } from './pointsPolicy.js';
 import { socialMethods, makeGwId } from './social.js';
+import { buildBadges } from './badges.js';
+import { ACCESS_TAGS } from './rules.js';
+
+const cleanAccess = (a) => Object.fromEntries(Object.entries(a || {}).filter(([k, v]) => ACCESS_TAGS[k] && typeof v === 'boolean'));
 
 const KEY = 'ghetto-wayz:demo-db:v2';
 
@@ -171,10 +175,10 @@ export class LocalDemoBackend {
   async listPaths({ status } = {}) {
     return this.db.paths
       .filter((p) => !status || p.status === status)
-      .map((p) => ({ ...p, lengthM: lineLength(p.points) }))
+      .map((p) => ({ ...p, access: p.access || {}, lengthM: lineLength(p.points), confirmations: (this.db.pathConfirmations || []).filter((c) => c.pathId === p.id) }))
       .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt));
   }
-  async suggestPath({ name, type, surface, note, points }) {
+  async suggestPath({ name, type, surface, note, points, access = {} }) {
     const user = this.requireUser();
     name = (name || '').trim().slice(0, 60);
     if (name.length < 3) throw new BackendError('invalid', 'Give the path a short name.');
@@ -185,13 +189,33 @@ export class LocalDemoBackend {
     const todays = this.db.paths.filter((p) => p.createdBy === user.id && sameDay(p.createdAt)).length;
     if (todays >= RATE_LIMITS.pathSuggestionsPerDay) throw new BackendError('rate', `Limit reached: ${RATE_LIMITS.pathSuggestionsPerDay} path suggestions per day.`);
     const path = {
-      id: 'path-' + uid(), name, type, surface, note: (note || '').trim().slice(0, 300),
+      id: 'path-' + uid(), name, type, surface, note: (note || '').trim().slice(0, 300), access: cleanAccess(access),
       points: points.map(([a, b]) => [+a.toFixed(5), +b.toFixed(5)]),
       status: 'pending', createdBy: user.id, createdAt: new Date().toISOString(),
     };
     this.db.paths.push(path);
     this.save();
     return path;
+  }
+  async confirmPath(id, stillOk = true) {
+    const me = this.requireUser();
+    const p = this.db.paths.find((x) => x.id === id);
+    if (!p || p.status !== 'approved') throw new BackendError('invalid', 'Only approved paths can be confirmed.');
+    if (p.createdBy === me.id) throw new BackendError('forbidden', 'You can\'t confirm your own path.');
+    this.db.pathConfirmations ||= [];
+    if (this.db.pathConfirmations.filter((c) => c.userId === me.id && sameDay(c.at)).length >= 20) throw new BackendError('rate', 'Confirmation limit reached for today.');
+    this.db.pathConfirmations = this.db.pathConfirmations.filter((c) => !(c.pathId === id && c.userId === me.id));
+    this.db.pathConfirmations.push({ pathId: id, userId: me.id, at: new Date().toISOString(), stillOk: !!stillOk });
+    this.save();
+  }
+  async myBadges() {
+    const me = this.requireUser();
+    this._ensurePoints?.();
+    return buildBadges({
+      trips: (this.db.tripSessions || []).filter((t) => t.userId === me.id),
+      awarded: (this.db.points || []).filter((e) => e.userId === me.id && e.status === 'awarded'),
+      pathChecks: (this.db.pathConfirmations || []).filter((c) => c.userId === me.id).length,
+    });
   }
   async reviewPath(id, decision, message = '') {
     this.requireAdmin();

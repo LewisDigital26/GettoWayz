@@ -25,9 +25,12 @@ import { STREETLIGHTS } from './backend/rules.js';
 import { communityRoutes } from './providers/communityRouting.js';
 import { TRIP } from './backend/pointsPolicy.js';
 import { showTripResult, renderLeaderboardPage } from './ui/points.js';
+import { openTripCard } from './ui/tripCard.js';
 import { renderActivityPage, attentionCount } from './ui/activity.js';
 import { initTabs, registerPage, setBadge, updateProfileTab } from './ui/tabs.js';
-import { prefs, applyPrefs } from './prefs.js';
+import { prefs, setPref, applyPrefs } from './prefs.js';
+import { openSafety, openArrivalTimer, safetyWatch, autoCheckIn, askNotifications } from './ui/safety.js';
+import { pathFreshness } from './ui/paths.js';
 
 // ---------- services ----------
 export const ctx = {
@@ -115,6 +118,7 @@ async function refreshShares() {
   ctx.shares = shares;
   ctx.map.renderFriends(shares, { freshness, onClick: (s) => openShareViewer(ctx, s) });
   renderShareBanner(ctx, shares);
+  safetyWatch(ctx, shares);
   // notify about new incoming shares
   const incoming = shares.filter((s) => s.direction === 'incoming' && s.status !== 'ended');
   const ids = incoming.map((s) => s.id).join(',');
@@ -140,6 +144,7 @@ async function refreshBadges(force = false) {
   }
   const social = ctx.lastSocial;
   setAttention(attentionCount(social, ctx.shares));
+  if (social?.friends?.length && !ctx.askedNotify) { ctx.askedNotify = true; document.addEventListener('pointerdown', askNotifications, { once: true }); } // SOS / overdue alerts in the background
   const sharing = ctx.shares.some((s) => s.direction === 'outgoing' && s.status !== 'ended' && s.status !== 'invited');
   setBadge('friends', { dot: sharing, label: sharing ? 'you are sharing live' : '' });
   const ids = (social?.incoming || []).map((r) => r.id);
@@ -208,6 +213,7 @@ function showHome({ keepState = false } = {}) {
     el('div', { class: 'quick-finds', role: 'list' },
       el('button', { class: 'btn sm quick primary', role: 'listitem', onclick: () => openExplore(ctx) }, '🧭 Explore'),
       ...QUICK_FINDS.map((c) => el('button', { class: 'btn sm quick', role: 'listitem', onclick: () => openCategory(ctx, c) }, c.emoji, ' ', c.label)),
+      el('button', { class: 'btn sm quick', role: 'listitem', onclick: () => openSafety(ctx) }, '🛡️ Safety'),
       state.user ? el('button', { class: 'btn sm quick', role: 'listitem', onclick: () => openGoToFriend(ctx) }, '🫂 Go to a friend') : null),
     el('div', { class: 'row between', style: 'margin-bottom:6px' },
       el('div', { class: 'stat' }, el('strong', {}, String(nearby)), el('span', {}, 'active alerts nearby')),
@@ -402,10 +408,11 @@ async function planRoute() {
     if (result.unsupported) throw new Error(result.unsupported);
     const routes = annotateRoutes(result.routes);
     set({ routes, routeProvider: result.provider, selectedRouteId: routes[0]?.id || null, routing: false });
+    applyRoutePrefs();
     applyRouteTraffic(routes);
     addCommunityRoutes(routes, [origin.lat, origin.lng], [dest.lat, dest.lng], state.mode)
       .then((latest) => scoreLighting(latest).then(() => latest))
-      .then((latest) => { if (state.routes === latest && !state.navigating) { applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } });
+      .then((latest) => { if (state.routes === latest && !state.navigating) { applyLitPreference(); applyRoutePrefs(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } });
   } catch (e) {
     set({ routing: false, routeError: e.message || 'Routing failed' });
   }
@@ -424,6 +431,7 @@ async function addCommunityRoutes(routes, from, to, mode) {
   const keepSelection = state.selectedRouteId !== routes[0]?.id; // user already picked one — don't move it
   const all = annotateRoutes([...routes, ...extra]).sort((a, b) => routeRank(a) - routeRank(b));
   set({ routes: all, selectedRouteId: keepSelection ? state.selectedRouteId : all[0].id });
+  applyRoutePrefs();
   ctx.map.renderRoutes(all, state.selectedRouteId, state.mode, selectRoute, { fit: false });
   renderRouteSheet();
   return all;
@@ -471,7 +479,10 @@ function annotateRoutes(routes) {
       if (hits >= Math.ceil(pts.length * .8)) used.add(p.id);
     }
     r.communityPathIds = [...used];
-    r.alertsNear = alertsNearRoute(state.alerts, r.geometry, 40);
+    // "Lit" / "working" reports are good news, not hazards
+    r.alertsNear = alertsNearRoute(state.alerts.filter((a) => !['light_ok', 'street_lit'].includes(a.category)), r.geometry, 40);
+    r.hazardScore = r.alertsNear.reduce((n, a) => n + (a.status === 'verified' ? 3 : a.communityConfirmed ? 2 : 1), 0);
+    r.blockedPathIds = (r.communityPathIds || []).filter((id) => { const p = state.paths.find((x) => x.id === id); return p && pathFreshness(p).blocked; });
     // Live traffic: driving routes use incidents fetched for the route area (map layer on or off); other modes only list them.
     r.baseDurationS ??= r.durationS;
     const driveTraffic = state.mode === 'drive' && !!ctx.trafficUi?.routeIncidents;
@@ -519,6 +530,37 @@ function applyLitPreference() {
   }
 }
 
+// ---------- route preferences: avoid reported hazards / avoid hills (device setting) ----------
+const PREF_LABELS = ['Fewest hazards', 'Flattest'];
+const hillsKnown = () => state.mode !== 'drive' && state.routes.some((r) => r.ascentM != null);
+function applyRoutePrefs() {
+  const live = state.routes.filter((r) => r.source !== 'estimate');
+  for (const r of state.routes) if (PREF_LABELS.includes(r.label)) r.label = 'Alternative';
+  if (live.length < 2) return;
+  const p = prefs(), hills = p.avoidHills && hillsKnown();
+  if (!p.avoidHazards && !hills) return;
+  // each preference may cost at most this much extra time, so a "safer" pick is never absurdly long
+  const best = Math.min(...live.map((r) => r.durationS)), cap = best * 1.5 + 300;
+  const key = (r) => (r.durationS > cap ? 1e9 : 0) + (p.avoidHazards ? r.hazardScore * 1e5 : 0) + (hills ? (r.ascentM ?? 1e4) * 100 : 0) + r.durationS;
+  state.routes.sort((a, b) => (a.source === 'estimate') - (b.source === 'estimate') || key(a) - key(b));
+  const top = state.routes[0];
+  if (top.label === 'Alternative') {
+    const fewer = p.avoidHazards && live.some((r) => r.hazardScore > top.hazardScore);
+    top.label = fewer ? 'Fewest hazards' : hills && top.ascentM != null && live.some((r) => r.ascentM == null || r.ascentM > top.ascentM + 5) ? 'Flattest' : top.label;
+  }
+  if (!ctx.routePicked) set({ selectedRouteId: top.id });
+}
+function routePrefsRow() {
+  if (state.routes.filter((r) => r.source !== 'estimate').length < 2) return null; // nothing to choose between
+  const p = prefs();
+  const toggle = (key, label, hint) => el('button', { class: `btn sm ${p[key] ? 'primary' : ''}`, 'aria-pressed': String(!!p[key]), title: hint,
+    onclick: () => { setPref(key, !p[key]); ctx.routePicked = false; annotateRoutes(state.routes); applyLitPreference(); applyRoutePrefs(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } }, label);
+  return el('div', { class: 'row wrap', style: 'gap:6px;margin:6px 0' },
+    el('span', { class: 'small muted' }, 'Prefer:'),
+    toggle('avoidHazards', '⚠️ Avoid reported hazards', 'Rank routes with fewer community alerts first (verified alerts count most)'),
+    hillsKnown() ? toggle('avoidHills', '⛰️ Fewer hills', 'Rank routes with less climbing first') : null);
+}
+
 function selectRoute(id) {
   if (id !== state.selectedRouteId) ctx.routePicked = true;
   set({ selectedRouteId: id });
@@ -544,7 +586,9 @@ function renderRouteSheet() {
     el('div', {},
       el('div', { class: 'label' }, rt.label, el('span', { class: `chip ${rt.source}` }, rt.source === 'live' ? 'Live' : rt.source === 'sample' ? 'Sample' : 'Estimate'),
         rt.communityPathIds.length ? el('span', { class: 'chip verified' }, `${rt.communityPathIds.length} community path${rt.communityPathIds.length > 1 ? 's' : ''}`) : null,
-        rt.alertsNear.length ? el('span', { class: 'chip pending' }, `${rt.alertsNear.length} alert${rt.alertsNear.length > 1 ? 's' : ''}`) : null,
+        rt.alertsNear.length ? el('span', { class: 'chip pending' }, `⚠️ ${rt.alertsNear.length} alert${rt.alertsNear.length > 1 ? 's' : ''}`) : null,
+        rt.blockedPathIds?.length ? el('span', { class: 'chip danger' }, '🚧 Path reported blocked') : null,
+        rt.ascentM != null && state.mode !== 'drive' ? el('span', { class: 'chip' }, `⛰️ ${rt.ascentM} m up`) : null,
         rt.roadClosed ? el('span', { class: 'chip', style: 'color:#ff4d4f;border-color:#ff4d4f' }, '⛔ Road closed') : null,
         rt.trafficChecked
           ? (rt.trafficDelayS >= 60
@@ -569,7 +613,10 @@ function renderRouteSheet() {
     el('input', { type: 'checkbox', checked: ctx.preferLit, onchange: (e) => { ctx.preferLit = e.target.checked; applyLitPreference(); ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false }); renderRouteSheet(); } }),
     el('span', { class: 'small' }, el('strong', {}, 'Prefer routes with confirmed lighting'), ' — ranks by lamps recently reported working. Not a safety rating.')) : null;
   ctx.map.renderLightingOverlay(ctx.lights?.visible() ? r.lighting?.segments : null);
-  renderSheet([head, cards, litToggle, r.source === 'estimate' ? null : shareBlock(),
+  const safetyRow = el('div', { class: 'row', style: 'gap:6px;margin:6px 0' },
+    el('button', { class: 'btn sm', onclick: () => (state.user ? openArrivalTimer(ctx, { etaS: r.durationS, destName: dest.name }) : openSafety(ctx)) }, '⏱️ Arrival timer'),
+    el('button', { class: 'btn sm', onclick: () => openSafety(ctx, { etaS: r.durationS, destName: dest.name }) }, '🛡️ Safety'));
+  renderSheet([head, cards, routePrefsRow(), litToggle, r.source === 'estimate' ? null : shareBlock(), safetyRow,
     el('div', { class: `notice ${r.source === 'estimate' ? 'warn' : 'info'}` }, r.basis),
     ctx.streetlights ? lightingBlock(r.lighting, { night: !!ctx.lights?.isNight }) : null,
     el('div', { class: 'row', style: 'margin:10px 0' },
@@ -603,6 +650,8 @@ function labelBasis(rt) {
   if (rt.label === 'Community shortcut') return 'Quickest option, thanks to a moderator-approved community path the map engine doesn’t know about yet.';
   if (rt.label === 'More verified paths') return 'Uses more moderator-approved community paths. Approval means the path is on the map — not a safety rating.';
   if (rt.label === 'Most confirmed lighting') return 'Highest share of lamps recently confirmed working by the community. Not a safety guarantee.';
+  if (rt.label === 'Fewest hazards') return 'Passes the fewest community-reported hazards (verified reports count most). Reports can be out of date.';
+  if (rt.label === 'Flattest') return 'Least climbing of the options, from elevation data. Gradients on short stretches may still be steep.';
   if (rt.label === 'Mapped streets only') return 'Quickest route using only ways already in OpenStreetMap.';
   if (rt.viaCommunity) return 'Uses a moderator-approved community path. Approval means the path is on the map — not a safety rating.';
   if (rt.source === 'estimate') return 'Straight-line estimate — no real path data.';
@@ -672,6 +721,7 @@ function sendTripCheckpoint(pos) {
 
 function beginNavigation(r) {
   arrivedShown = false;
+  ctx.navStartedAt = Date.now();
   startTripTracking(r);
   set({ navigating: true });
   hideSheet(true);
@@ -694,14 +744,29 @@ function beginNavigation(r) {
 function endNavigation() {
   const shareId = ctx.activeTripShare, trip = ctx.activeTrip;
   const pos = state.position ? { lat: state.position.lat, lng: state.position.lng } : null;
+  const r = selectedRoute();
+  const info = arrivedShown && r ? { mode: state.mode, distanceM: r.distanceM, durationS: ctx.navStartedAt ? (Date.now() - ctx.navStartedAt) / 1000 : r.durationS,
+    ascentM: state.mode !== 'drive' ? r.ascentM ?? null : null, destName: state.destination?.name, alias: state.user?.alias } : null;
   ctx.activeTripShare = null; ctx.activeTrip = null;
   if (shareId) ctx.backend.stopShare(shareId, 'cancelled').then(refreshShares).catch(() => {}); // ending navigation ends trip sharing
   exitNavigationUi();
   // The server checks the trip and decides any points — only now, after navigation has ended.
-  if (trip) ctx.backend.finishTrip(trip.id, pos).then((res) => { set({ user: ctx.backend.currentUser() }); updateAvatar(); showTripResult(res); })
+  if (trip) ctx.backend.finishTrip(trip.id, pos)
+    .then(async (res) => {
+      set({ user: ctx.backend.currentUser() }); updateAvatar();
+      if (info) { const b = await ctx.backend.myBadges?.().catch(() => null); info.streak = b?.streak?.current || 0; }
+      showTripResult(res, info);
+    })
     .catch((e) => toast(navigator.onLine ? `Trip couldn't be checked: ${e.message}` : 'Offline — this trip could not be checked for points.', 'error'));
+  else if (info && info.mode !== 'drive') openTripCardOffer(info);
 }
 let arrivedShown = false;
+function openTripCardOffer(info) {
+  openModal('You made it 🎉', [
+    el('p', {}, `${fmtDistance(info.distanceM)} ${MODES[info.mode].label.toLowerCase()} in ${fmtDuration(info.durationS)}.`),
+    el('button', { class: 'btn primary block', onclick: () => openTripCard(info) }, '📸 Share trip card'),
+  ]);
+}
 function exitNavigationUi() {
   set({ navigating: false });
   $('#navbar').hidden = true; $('#fabs').hidden = false; $('#modebar').hidden = false; $('.topbar').hidden = false;
@@ -763,7 +828,7 @@ function onNavTick(pos) {
   for (let i = 0; i < r.steps.length; i++) { acc += r.steps[i].dist; if (done < acc) { stepI = i; break; } stepI = i; }
   if (haversine(me, r.geometry[r.geometry.length - 1]) < 25) {
     showStep(r.steps.length - 1, r, 0);
-    if (!arrivedShown) { arrivedShown = true; toast('You have arrived 🎉', 'success'); shareArrived(pos); if (ctx.activeTrip) ctx.activeTrip.lastSent = 0; if (state.user && r.source !== 'estimate') endNavigation(); }
+    if (!arrivedShown) { arrivedShown = true; toast('You have arrived 🎉', 'success'); shareArrived(pos); autoCheckIn(ctx); if (ctx.activeTrip) ctx.activeTrip.lastSent = 0; if (state.user && r.source !== 'estimate') endNavigation(); }
     return;
   }
   sendTripCheckpoint(pos);
@@ -774,6 +839,8 @@ function onNavTick(pos) {
 
 // ---------- map controls, layers, fabs ----------
 $('#zoomIn').addEventListener('click', () => ctx.map.zoomIn());
+$('#safetyBtn').addEventListener('click', () => openSafety(ctx, state.destination && selectedRoute() ? { etaS: selectedRoute().durationS, destName: state.destination.name } : {}));
+$('#navSafetyBtn').addEventListener('click', () => openSafety(ctx, { etaS: selectedRoute()?.durationS, destName: state.destination?.name }));
 $('#zoomOut').addEventListener('click', () => ctx.map.zoomOut());
 $('#layersBtn').addEventListener('click', () => { const p = $('#layersPanel'); p.hidden = !p.hidden; $('#layersBtn').setAttribute('aria-expanded', String(!p.hidden)); });
 document.addEventListener('click', (e) => { const p = $('#layersPanel'); if (!p.hidden && !e.target.closest('#layersPanel') && !e.target.closest('#layersBtn')) { p.hidden = true; $('#layersBtn').setAttribute('aria-expanded', 'false'); } });

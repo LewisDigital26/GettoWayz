@@ -33,6 +33,7 @@ export class OpenRouteServiceProvider {
       body: JSON.stringify({
         coordinates: [[from[1], from[0]], [to[1], to[0]]],
         instructions: true,
+        elevation: mode !== 'drive', // climb/descent for walk, bike and scooter (free with the same key)
         alternative_routes: { target_count: 3, weight_factor: 1.6, share_factor: 0.6 },
       }),
     });
@@ -41,13 +42,15 @@ export class OpenRouteServiceProvider {
     const routes = (json.features || []).map((f, i) => {
       const geometry = f.geometry.coordinates.map(([lng, lat]) => [lat, lng]);
       const seg = f.properties.segments?.[0];
+      const ascentM = f.properties.ascent != null ? Math.round(f.properties.ascent) : null;
+      const descentM = f.properties.descent != null ? Math.round(f.properties.descent) : null;
       const distanceM = f.properties.summary.distance;
       const durationS = mode === 'scooter' ? distanceM / MODES.scooter.speed : f.properties.summary.duration;
       return {
         id: uid(), label: i === 0 ? 'Quickest' : 'Alternative',
         basis: (mode === 'drive' ? 'Live driving route from OpenRouteService on roads open to cars (OpenStreetMap access rules). Travel time is a free-flow estimate — no live traffic.' : 'Live route from OpenRouteService over OpenStreetMap public ways.') + scooterNote(mode),
         traffic: false,
-        source: 'live', geometry, distanceM, durationS,
+        source: 'live', geometry, distanceM, durationS, ascentM, descentM,
         steps: (seg?.steps || []).map((s) => ({ text: s.instruction, dist: s.distance })),
       };
     });

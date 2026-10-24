@@ -1,7 +1,8 @@
 // Friends, live-location sharing and trip sharing screens.
 import { $, el, esc, fmtAgo, fmtDistance, fmtDuration, haversine, MODES } from '../util.js';
 import { state, set, selectedRoute } from '../state.js';
-import { SHARE_DURATIONS, SHARE_STALE_SECONDS, SHARE_LOST_SECONDS, FRIEND_LIMITS } from '../backend/rules.js';
+import { SHARE_DURATIONS, SHARE_STALE_SECONDS, SHARE_LOST_SECONDS, FRIEND_LIMITS, EMERGENCY_NUMBER } from '../backend/rules.js';
+import { checkInSafe } from './safety.js';
 import { openModal, closeModal, isModalOpen } from './modal.js';
 import { toast } from './sheet.js';
 import { requireSignIn, guestState } from './account.js';
@@ -353,18 +354,27 @@ export async function openGoToFriend(ctx) {
 export function renderShareBanner(ctx, shares) {
   const host = $('#shareBanner');
   const outgoing = shares.filter((s) => s.direction === 'outgoing' && s.status !== 'ended');
-  const incoming = shares.filter((s) => s.direction === 'incoming' && s.type === 'trip' && s.status !== 'ended');
+  const incoming = shares.filter((s) => s.direction === 'incoming' && s.status !== 'ended' && (s.type === 'trip' || s.trip?.sos || s.trip?.safety));
   // Show at most one recent "ended" notice, and only for endings the other person (or the system) caused —
   // the user already got a toast for the ones they did themselves.
   const ownAction = (s) => (s.direction === 'outgoing' ? ['stopped', 'cancelled', 'replaced'] : ['declined', 'left']).includes(s.endedReason);
   const recentlyEnded = shares.filter((s) => s.status === 'ended' && s.endedAt && Date.now() - new Date(s.endedAt) < 120000 && !ctx.dismissed?.has(s.id)
-    && (s.direction === 'outgoing' || s.type === 'trip') && !ownAction(s)).sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt)).slice(0, 1);
+    && (s.direction === 'outgoing' || s.type === 'trip' || s.trip?.safety || s.trip?.sos) && !ownAction(s) && !(s.direction === 'outgoing' && s.endedReason === 'safe')).sort((a, b) => new Date(b.endedAt) - new Date(a.endedAt)).slice(0, 1);
   host.hidden = !outgoing.length && !incoming.length && !recentlyEnded.length;
   const noLoc = ['denied', 'unavailable'].includes(state.locationStatus);
   const pill = (cls, title, sub, ...btns) => el('div', { class: `sharepill ${cls}` }, el('span', { class: 'dot' }), el('div', { class: 'sharepill-text' }, el('strong', {}, title), el('span', {}, sub)), ...btns);
   const stopBtn = (s, label = 'Stop sharing') => el('button', { class: 'btn sm danger', onclick: async () => { try { await ctx.backend.stopShare(s.id); if (ctx.activeTripShare === s.id) ctx.activeTripShare = null; toast('Sharing stopped. Your route and position were deleted.'); } catch (e) { toast(e.message, 'error'); } } }, label);
   host.replaceChildren(
     ...outgoing.map((s) => {
+      if (s.type !== 'trip' && s.trip?.sos) return pill('sos', `🚨 SOS: ${esc(s.to.alias)} can see your location`, `ends ${clock(s.endsAt)} (${minsLeft(s.endsAt)} min)`,
+        el('a', { class: 'btn sm danger', href: `tel:${EMERGENCY_NUMBER}` }, `Call ${EMERGENCY_NUMBER}`),
+        el('button', { class: 'btn sm', onclick: async () => { try { await ctx.backend.stopShare(s.id); toast('Stopped sharing. Your position was deleted.'); } catch (e) { toast(e.message, 'error'); } } }, 'I\'m OK — stop'));
+      if (s.type !== 'trip' && s.trip?.safety) {
+        const due = new Date(s.trip.safety.dueAt), late = Date.now() > due;
+        return pill(late ? 'sos' : s.status, late ? `Overdue — ${esc(s.to.alias)} has been told` : `⏱️ ${esc(s.to.alias)} expects you by ${clock(due)}`,
+          late ? 'Check in so they know you\'re OK' : `${Math.max(0, Math.ceil((due - Date.now()) / 60000))} min left · your location is shared until then`,
+          el('button', { class: 'btn sm primary', onclick: () => checkInSafe(ctx, [s]) }, 'I\'m here safe'));
+      }
       if (s.type !== 'trip') return pill(s.status, s.status === 'paused' ? 'Paused' : `Sharing location with ${esc(s.to.alias)}`, `since ${clock(s.startedAt)} · ends ${clock(s.endsAt)} (${minsLeft(s.endsAt)} min)`,
         s.status === 'active' ? el('button', { class: 'btn sm', onclick: () => ctx.backend.pauseShare(s.id) }, 'Pause') : el('button', { class: 'btn sm', onclick: () => ctx.backend.resumeShare(s.id) }, 'Resume'), stopBtn(s, 'Stop'));
       const liveBtn = s.live
@@ -375,7 +385,11 @@ export function renderShareBanner(ctx, shares) {
         noLoc ? 'Your location is unavailable, so they see your last update only' : `${modeLabel(s.trip.mode)} to ${esc(s.trip.destName)} · ends when you arrive`, liveBtn, stopBtn(s));
       return pill('paused', `${esc(s.to.alias)} can see your route`, 'Live progress is off — no position is being shared', liveBtn, stopBtn(s));
     }),
-    ...incoming.map((s) => s.status === 'invited'
+    ...incoming.map((s) => s.type !== 'trip'
+      ? pill('sos', s.trip?.sos ? `🚨 ${esc(s.from.alias)} sent an SOS` : (Date.now() > new Date(s.trip.safety.dueAt) ? `⚠️ ${esc(s.from.alias)} hasn't checked in` : `⏱️ ${esc(s.from.alias)} is heading somewhere`),
+          s.trip?.sos ? (s.lastPos ? `Last update ${fmtAgo(s.lastPos.at)}` : 'Waiting for their first position') : `Due by ${clock(s.trip.safety.dueAt)}${s.lastPos ? ` · last update ${fmtAgo(s.lastPos.at)}` : ''}`,
+          el('button', { class: 'btn sm', onclick: () => ctx.focusShare(s.id) }, 'View'))
+      : s.status === 'invited'
       ? pill('invited', `${esc(s.from.alias)} wants to share a trip`, `${modeLabel(s.trip.mode)} to ${esc(s.trip.destName)}`, el('button', { class: 'btn sm primary', onclick: () => openShareViewer(ctx, s) }, 'View'))
       : pill(s.live && freshness(s) === 'live' ? 'active' : 'paused', `Following ${esc(s.from.alias)}’s trip`,
           !s.live ? 'Live progress is off · route only' : s.lastPos ? (freshness(s) === 'live' ? 'Live' : `Last update ${fmtAgo(s.lastPos.at)}`) : 'Waiting for their first update',
@@ -386,7 +400,7 @@ export function renderShareBanner(ctx, shares) {
   document.documentElement.style.setProperty('--share-h', `${host.hidden ? 0 : host.offsetHeight}px`);
 }
 export const endedLabel = (r, dir = 'outgoing') => ({
-  expired: 'time limit reached', stopped: dir === 'outgoing' ? 'you stopped it' : 'they stopped sharing', arrived: 'arrived at the destination',
+  safe: dir === 'outgoing' ? 'you checked in safe' : 'they checked in safe ✅', expired: 'time limit reached', stopped: dir === 'outgoing' ? 'you stopped it' : 'they stopped sharing', arrived: 'arrived at the destination',
   blocked: 'blocked', unfriended: 'no longer friends', replaced: 'replaced by a newer share', cancelled: 'trip cancelled',
   declined: dir === 'outgoing' ? 'they declined' : 'you declined', left: dir === 'outgoing' ? 'they stopped following' : 'you stopped following',
 }[r] || 'ended');
@@ -399,7 +413,7 @@ export function openShareViewer(ctx, share) {
   const body = [];
   const title = share.type === 'trip' ? `${esc(share.from.alias)}'s trip` : `${esc(share.from.alias)}'s location`;
   if (share.status === 'ended') {
-    body.push(el('div', { class: 'empty' }, el('div', { class: 'big' }, share.endedReason === 'arrived' ? '🏁' : '⏹️'), el('strong', {}, share.endedReason === 'arrived' ? `${esc(share.from.alias)} arrived` : 'Sharing ended'), el('div', { class: 'muted small' }, endedLabel(share.endedReason, 'incoming'), share.endedAt ? ` · ${fmtAgo(share.endedAt)}` : '')));
+    body.push(el('div', { class: 'empty' }, el('div', { class: 'big' }, share.endedReason === 'arrived' ? '🏁' : share.endedReason === 'safe' ? '✅' : '⏹️'), el('strong', {}, share.endedReason === 'arrived' ? `${esc(share.from.alias)} arrived` : share.endedReason === 'safe' ? `${esc(share.from.alias)} checked in safe` : 'Sharing ended'), el('div', { class: 'muted small' }, endedLabel(share.endedReason, 'incoming'), share.endedAt ? ` · ${fmtAgo(share.endedAt)}` : '')));
     return openModal(title, body);
   }
   if (share.type === 'trip' && share.status === 'invited') {

@@ -95,6 +95,32 @@ Before a public launch, move the TomTom incidents call behind a Supabase Edge Fu
 - **Reviews never earn points.** Nothing in the reviews code calls the points functions — it's on purpose, to keep reviews honest.
 - **Privacy**: a review stores only the place's own public OSM coordinates, never where the reviewer was. Aliases are shown; emails never are.
 
+### Safety: quick share, arrival timer, 999
+
+The 🛡️ button (map controls, home sheet, route sheet and the navigation bar) opens **Safety**:
+
+- **Quick share (SOS)** — tick your trusted friends (remembered on this device) and share your live location with all of them for 60 minutes in one tap. Each friend gets a full-screen **🚨 SOS** alert with *Show on map* and *Call 999*. Your banner shows *Call 999* and *I'm OK — stop*.
+- **Arrival timer** — pick one friend and *Check in within* 15 / 30 / 60 min (the route sheet pre-picks one that covers the ETA). They see your live location; if you haven't checked in by then, their app shows **⚠️ X hasn't checked in** with your last position. Tap **I'm here safe** on your banner — or just arrive while navigating, which checks in automatically — and they get *✅ checked in safe*.
+- **Call 999** is always one tap away, signed in or not.
+- **How it works:** both are ordinary location shares tagged `{ sos: true }` or `{ safety: { dueAt } }` on the share row, so the same privacy rules apply (friends only, positions deleted when it ends, only while the app is open). `migration-010` adds the `safe` end reason. Alerts reach friends while their app is open; if they allowed notifications, the phone also buzzes and shows a system notification. **GettoWayz is not an emergency service** — the copy says so.
+
+### Route preferences, hazards and hills
+
+- Route cards show `⚠️ N alerts` (good-news reports like "lamp working" no longer count), `⛰️ N m up` (climb from OpenRouteService elevation, walk/bike/scooter) and `🚧 Path reported blocked` when the latest community check on a path it uses says so.
+- **Prefer:** *Avoid reported hazards* ranks routes by a hazard score (verified alert 3, community-confirmed 2, unreviewed 1); *Fewer hills* ranks by climb. Either can cost at most 1.5× the quickest time + 5 min. The winner is labelled **Fewest hazards** / **Flattest**. The choice is stored on the device.
+- Community routing skips any approved path whose latest check says it's blocked.
+
+### Community path checks & accessibility tags
+
+- **I've used this — still there / It's blocked or gone** on any approved path (not your own; 20 a day; no points). The path shows `✅ N used it`, *last checked …*, or a *Not confirmed in 90 days* / *Latest report: blocked* chip.
+- Path suggestions can be tagged **step-free, pushchair OK, cargo bike fits, dropped kerbs, lit at night, has a gate**. Tags show on the path.
+- **Bike parking** is an Explore category (OSM `amenity=bicycle_parking`). Its place sheet lists recent **🔓 Bike theft spot** reports nearby and has *Report a theft here*. Bike theft is also a normal alert category (14-day expiry).
+
+### Badges, streaks & trip cards
+
+- **Profile › Badges & streak**: 13 badges (first trip, 10/50 trips, 10/100 km, 3/7-day streaks, all-rounder, hazard hunter, lamp lighter, path maker, cartographer, path checker) and your current/best streak — days in a row (UK time) with a verified trip. In live mode `my_badges()` works them out in SQL from verified trips, awarded points and path checks, so they can't be faked; nothing is stored and badges never earn points.
+- **Trip cards**: after a trip, *📸 Share trip card* draws a picture (distance, time, mode, points, streak, climb, your alias) to share or save. It never shows the route or a map; the destination is off unless you tick *Show where I went*.
+
 ### Scooter mode
 
 No public routing engine has a scooter profile. Scooter mode uses the cycling network with scooter speed estimates and says so in the route basis. Check local rules on where e-scooters may be ridden.
@@ -104,7 +130,7 @@ No public routing engine has a scooter profile. Scooter mode uses the cycling ne
 Everything — accounts, alerts, paths, points, friends, live sharing, trip rewards — runs on one free Supabase project.
 
 1. **Create a project** at supabase.com (Ireland / eu-west-1 is fine for the UK).
-2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`, then `supabase/migration-005-manual-points.sql`, then `supabase/migration-006-realtime-alerts.sql`, then `supabase/migration-007-mods-on-leaderboard.sql`, then `supabase/migration-008-place-reviews.sql`. New projects run schema.sql, then 002 to 008 in order.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
+2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`, then `supabase/migration-005-manual-points.sql`, then `supabase/migration-006-realtime-alerts.sql`, then `supabase/migration-007-mods-on-leaderboard.sql`, then `supabase/migration-008-place-reviews.sql`. New projects run schema.sql, then 002 to 010 in order — `migration-009-street-lighting.sql` and `migration-010-community-badges.sql` come last.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
 3. **Keys**: *Project Settings → API*. Copy the Project URL and the **anon / publishable** key (never the `service_role` key).
 4. **Config**: copy `config.example.js` → `config.local.js`:
    ```js

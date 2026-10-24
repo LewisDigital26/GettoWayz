@@ -13,6 +13,7 @@ import { avatar } from './avatar.js';
 import { updateProfileTab } from './tabs.js';
 import { prefs, setPref } from '../prefs.js';
 import { setActivityFilter } from './activity.js';
+import { BADGES } from '../backend/badges.js';
 
 export const COLOURWAYS = [
   { key: '', name: 'Night Route', desc: 'Charcoal + navy, lime accent', bg: '#16181f', a: '#aaf129', b: '#2bb190', c: '#202b47' },
@@ -184,6 +185,28 @@ export async function renderProfilePage(ctx, page) {
     })),
     lv.level.n > levelInfo(points).level.n ? el('p', { class: 'small muted', style: 'margin:4px 2px 0' }, 'Some points were reversed, but you keep the highest level you reached.') : null);
 
+  // Badges & streak load after the page shows (server-computed in live mode, migration-010)
+  const badgeBody = el('div', {}, el('div', { class: 'loading-row' }, el('span', { class: 'spinner' }), 'Loading badges…'));
+  const badgesSec = el('section', { class: 'sec', 'aria-labelledby': 'bd-h' }, el('div', { class: 'sec-title' }, el('h2', { id: 'bd-h' }, 'Badges & streak')), badgeBody);
+  (ctx.backend.myBadges?.() ?? Promise.resolve(null)).then((b) => {
+    if (!b) { badgeBody.replaceChildren(el('p', { class: 'small muted', style: 'margin:0 2px' }, 'Badges need the latest server update (migration-010).')); return; }
+    const earned = b.badges.filter((x) => x.progress >= x.target).length;
+    badgeBody.replaceChildren(
+      el('div', { class: 'streak-row' },
+        el('div', { class: 'streak' }, el('strong', {}, `🔥 ${b.streak.current}`), el('span', {}, b.streak.current === 1 ? 'day streak' : 'days streak')),
+        el('div', { class: 'streak' }, el('strong', {}, String(b.streak.best)), el('span', {}, 'best streak')),
+        el('div', { class: 'streak' }, el('strong', {}, `${earned}/${b.badges.length}`), el('span', {}, 'badges'))),
+      el('p', { class: 'small muted', style: 'margin:6px 2px 10px' }, b.streak.current ? 'A streak counts days in a row with a verified trip. Trip today to keep it.' : 'Finish a verified trip on consecutive days to build a streak.'),
+      el('div', { class: 'badge-grid', role: 'list' }, ...b.badges.map((x) => {
+        const d = BADGES[x.key]; if (!d) return null;
+        const got = x.progress >= x.target;
+        return el('div', { class: `badge ${got ? 'got' : ''}`, role: 'listitem', 'aria-label': `${d.name}: ${d.desc}. ${got ? 'Earned' : `${Math.min(x.progress, x.target)} of ${x.target}`}` },
+          el('div', { class: 'be', 'aria-hidden': 'true' }, got ? d.emoji : '🔒'), el('div', { class: 'bn' }, d.name),
+          el('div', { class: 'bd' }, got ? d.desc : `${Math.min(x.progress, x.target)}/${x.target} · ${d.desc}`));
+      })),
+      el('p', { class: 'small', style: 'color:var(--text-3);margin:8px 2px 0' }, 'Badges are worked out from verified trips and approved contributions. They don\'t earn points.'));
+  }).catch(() => badgeBody.replaceChildren(el('p', { class: 'small muted' }, 'Couldn\'t load badges right now.')));
+
   const recent = contribs.slice(0, 4);
   const contribSec = el('section', { class: 'sec', 'aria-labelledby': 'co-h' },
     el('div', { class: 'sec-title' }, el('h2', { id: 'co-h' }, 'Contributions'), contribs.length ? el('button', { class: 'link', onclick: () => { setActivityFilter('contrib'); ctx.showTab('activity', { focus: true }); } }, 'See all') : null),
@@ -227,6 +250,6 @@ export async function renderProfilePage(ctx, page) {
     ctx.backend.resetDemo ? setRow('♻️', 'Reset demo data', 'Clears everything stored on this device', null, { onclick: () => { if (confirm('Reset all demo data on this device?')) { ctx.backend.resetDemo(); toast('Demo data reset'); ctx.showHome(); ctx.refreshPage(); } } }) : null,
     setRow('↩️', 'Sign out', null, null, { onclick: async () => { await ctx.backend.signOut(); toast('Signed out'); ctx.showHome(); ctx.refreshPage(); } }));
 
-  return el('div', {}, hero, milestones, contribSec, sharingSec, privacy, notif, notifNote, ...deviceSettings(ctx), app,
+  return el('div', {}, hero, milestones, badgesSec, contribSec, sharingSec, privacy, notif, notifNote, ...deviceSettings(ctx), app,
     stats ? el('p', { class: 'small muted', style: 'margin:14px 2px 0' }, `Today: ${stats.alertsToday}/${RATE_LIMITS.alertsPerDay} reports · ${stats.pathsToday}/${RATE_LIMITS.pathSuggestionsPerDay} path suggestions`) : null);
 }

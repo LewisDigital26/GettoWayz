@@ -21,6 +21,7 @@ export const ALERT_CATEGORIES = {
   lighting: { label: 'Poor lighting',  emoji: '💡', desc: 'Lamp out, dark stretch', expiryDays: 60 },
   closure:  { label: 'Temporary closure', emoji: '⛔', desc: 'Path or bridge closed', expiryDays: 14 },
   flooding: { label: 'Flooded / muddy', emoji: '🌊', desc: 'Standing water, impassable', expiryDays: 3 },
+  bike_theft: { label: 'Bike theft spot', emoji: '🔓', desc: 'Bikes stolen or stripped here — lock up well', expiryDays: 14 },
   other:    { label: 'Other hazard',   emoji: '⚠️', desc: 'Anything else worth knowing', expiryDays: 14 },
   // Streetlight reports — attached to a lamp on the streetlight layer. Status is derived from these, never assumed.
   light_out: { label: 'Streetlight out', emoji: '🔦', desc: 'This lamp is not working', expiryDays: 30, lamp: true },
@@ -54,6 +55,29 @@ export const PATH_TYPES = {
   shared: 'Shared path (walk + cycle)',
   steps: 'Steps / stairs',
 };
+// Accessibility tags on a path suggestion (all optional). Shown on the path and used to filter routing.
+export const ACCESS_TAGS = {
+  stepFree:     { label: 'Step-free', emoji: '♿' },
+  pushchair:    { label: 'Pushchair OK', emoji: '👶' },
+  cargoBike:    { label: 'Cargo bike / trike fits', emoji: '🚲' },
+  droppedKerbs: { label: 'Dropped kerbs at ends', emoji: '⬇️' },
+  lit:          { label: 'Lit at night', emoji: '💡' },
+  gated:        { label: 'Has a gate or barrier', emoji: '🚪' },
+};
+// A path nobody has confirmed using for this long is marked "not confirmed recently".
+export const PATH_STALE_DAYS = 90;
+
+// ---------- Safety ----------
+// Arrival timer: "I should be there in N min". The friend is told if you haven't checked in by then.
+// The share itself runs a bit longer so they can still see your last position after the deadline.
+export const ARRIVAL_TIMERS = [
+  { dueMinutes: 15, shareMinutes: 30, label: '15 min' },
+  { dueMinutes: 30, shareMinutes: 60, label: '30 min' },
+  { dueMinutes: 60, shareMinutes: 120, label: '1 hour' },
+];
+export const SOS_SHARE_MINUTES = 60;
+export const EMERGENCY_NUMBER = '999';
+
 export const SURFACES = { paved: 'Paved', gravel: 'Gravel', dirt: 'Dirt / grass', unknown: 'Not sure' };
 
 export const CONFIRMATIONS_TO_AUTO_FLAG = 2; // alerts with 2+ confirmations get the "community confirmed" marker

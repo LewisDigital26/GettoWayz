@@ -161,7 +161,7 @@ export const socialMethods = {
     const s = { id: 'sh-' + uid(), from: me.id, to, type, startedAt: iso(), endsAt: new Date(now() + minutes * 60000).toISOString(), status, live, trip, route };
     this.db.shares.push(s); this.save(); return this._shareView(s, me.id);
   },
-  async startLocationShare(friendUserId, minutes) { return this._startShare({ to: friendUserId, minutes, type: 'location' }); },
+  async startLocationShare(friendUserId, minutes, extra = null) { return this._startShare({ to: friendUserId, minutes, type: 'location', trip: extra || undefined }); },
   /**
    * Share a planned or active route with ONE accepted friend. It starts as an invitation: the friend sees who,
    * where to, travel mode, distance and time — not the route line or any position — until they accept.
@@ -223,7 +223,8 @@ export const socialMethods = {
     const s = this.db.shares.find((x) => x.id === id);
     if (!s || (s.from !== me.id && s.to !== me.id)) throw new BackendError('forbidden', 'Not your sharing session.');
     if (s.status === 'ended') return;
-    let r = s.to === me.id ? 'left' : (['stopped', 'cancelled', 'arrived'].includes(reason) ? reason : 'stopped');
+    let r = s.to === me.id ? 'left' : (['stopped', 'cancelled', 'arrived', 'safe'].includes(reason) ? reason : 'stopped');
+    if (r === 'safe' && !s.trip?.safety) r = 'stopped'; // only arrival-timer shares check in
     if (r === 'arrived' && !(s.lastPos && s.trip && haversine([s.lastPos.lat, s.lastPos.lng], [s.trip.destLat, s.trip.destLng]) <= TRIP_LIMITS.arrivalRadiusM)) r = 'stopped';
     this._endShare(s, r); this.save();
   },
@@ -253,7 +254,7 @@ export const socialMethods = {
       from: this._publicPeer(s.from), to: this._publicPeer(s.to), direction: isOwner ? 'outgoing' : 'incoming',
     };
     if (s.to !== viewerId && !isOwner) return null;
-    if (s.trip) v.trip = { destName: s.trip.destName, destLat: s.trip.destLat, destLng: s.trip.destLng, mode: s.trip.mode || 'walk', routeDistanceM: s.trip.routeDistanceM, durationS: s.trip.durationS, progressM: s.trip.progressM, arrived: s.trip.arrived, acceptedAt: s.trip.acceptedAt, toFriendLocation: s.trip.toFriendLocation };
+    if (s.trip) v.trip = { safety: s.trip.safety, sos: s.trip.sos, destName: s.trip.destName, destLat: s.trip.destLat, destLng: s.trip.destLng, mode: s.trip.mode || 'walk', routeDistanceM: s.trip.routeDistanceM, durationS: s.trip.durationS, progressM: s.trip.progressM, arrived: s.trip.arrived, acceptedAt: s.trip.acceptedAt, toFriendLocation: s.trip.toFriendLocation };
     // ACCESS CHECK: the route line goes to the owner, and to the recipient only after they accepted.
     const route = s.route || s.trip?.geometry;
     if (v.trip && route && s.status !== 'ended' && (isOwner || s.status === 'active')) v.trip.geometry = route;

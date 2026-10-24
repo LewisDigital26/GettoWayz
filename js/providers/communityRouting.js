@@ -34,6 +34,7 @@ export function pickCandidates({ from, to, mode, paths, baseDistanceM, exclude =
   const out = [];
   for (const p of paths) {
     if (p.status !== 'approved' || !ok.includes(p.type) || exclude.has(p.id)) continue;
+    if (latestSaysBlocked(p)) continue; // the most recent community check says it's blocked or gone
     if (!Array.isArray(p.points) || p.points.length < 2) continue;
     const len = lineLength(p.points);
     const a = p.points[0], b = p.points[p.points.length - 1];
@@ -116,4 +117,9 @@ export async function communityRoutes({ routing, from, to, mode, paths, base }) 
     .filter((r) => r.durationS <= quickest.durationS * CR.maxSlowdown)
     .sort((a, b) => a.durationS - b.durationS)
     .slice(0, CR.maxExtraRoutes);
+}
+
+function latestSaysBlocked(p) {
+  const last = (p.confirmations || []).reduce((a, c) => (!a || new Date(c.at) > new Date(a.at) ? c : a), null);
+  return !!last && last.stillOk === false;
 }
