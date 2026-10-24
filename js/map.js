@@ -164,6 +164,27 @@ export class GwMap {
     }
   }
 
+  // ----- explore: places -----
+  /** places: Place[] (from providers/places.js); shapes come from the category's group, so categories differ by shape + emoji, not only colour. */
+  renderPlaces(places, { shapeOf, emojiOf, activeId = null, ratings = {}, onClick } = {}) {
+    this.placeLayer ||= L.layerGroup();
+    this.placeLayer.clearLayers();
+    for (const p of places) {
+      const active = p.id === activeId;
+      const r = ratings[p.key];
+      const html = `<div class="place-marker ${shapeOf?.(p) || 'round'} ${active ? 'active' : ''}" title="${esc(p.name)}"><span>${emojiOf?.(p) || '📍'}</span>${r ? `<i>★${r.avg}</i>` : ''}</div>`;
+      const m = L.marker([p.lat, p.lng], { icon: L.divIcon({ className: '', html, iconSize: [34, 34], iconAnchor: [17, 17] }), zIndexOffset: active ? 800 : 500 });
+      m.on('click', () => onClick?.(p));
+      m.addTo(this.placeLayer);
+    }
+    if (places.length) this.placeLayer.addTo(this.map); else this.placeLayer.remove();
+  }
+  clearPlaces() { this.placeLayer?.clearLayers(); this.placeLayer?.remove(); }
+  fitPoints(points, { pad = 40 } = {}) {
+    if (!points.length) return;
+    this.map.fitBounds(L.latLngBounds(points), { paddingTopLeft: [pad, 130], paddingBottomRight: [pad, window.innerWidth >= 900 ? 60 : Math.min(window.innerHeight * .45, 360)], maxZoom: 17 });
+  }
+
   // ----- streetlights -----
   bounds() { const b = this.map.getBounds(); return { south: b.getSouth(), west: b.getWest(), north: b.getNorth(), east: b.getEast() }; }
   zoom() { return this.map.getZoom(); }

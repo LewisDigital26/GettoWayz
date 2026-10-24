@@ -214,5 +214,84 @@ export class LocalDemoBackend {
     };
   }
   aliasOf(userId) { return this.db.users.find((u) => u.id === userId)?.alias || 'member'; }
+
+  // ---------- place reviews (demo). Same rules as supabase/migration-008-place-reviews.sql. Never award points. ----------
+  _reviews() { this.db.reviews ||= []; this.db.reviewReports ||= []; return this.db.reviews; }
+  _reviewView(r, me) {
+    const own = r.userId === me?.id, admin = me?.role === 'admin';
+    return { id: r.id, userId: r.userId, alias: this.aliasOf(r.userId), rating: r.rating, body: r.body, createdAt: r.createdAt, updatedAt: r.updatedAt, hidden: r.hidden,
+      hiddenReason: own || admin ? r.hiddenReason : null, reportCount: own || admin ? r.reportCount : 0,
+      reportedByMe: !!me && this.db.reviewReports.some((x) => x.reviewId === r.id && x.by === me.id), mine: own };
+  }
+  async listPlaceReviews(placeKey) {
+    const me = this.currentUser();
+    return this._reviews().filter((r) => r.placeKey === placeKey && (!r.hidden || r.userId === me?.id || me?.role === 'admin'))
+      .sort((a, b) => (b.userId === me?.id) - (a.userId === me?.id) || b.updatedAt.localeCompare(a.updatedAt)).map((r) => this._reviewView(r, me));
+  }
+  async placeReviewSummary(keys) {
+    const out = {};
+    for (const k of keys) {
+      const rs = this._reviews().filter((r) => r.placeKey === k && !r.hidden);
+      if (rs.length) out[k] = { avg: Math.round((rs.reduce((n, r) => n + r.rating, 0) / rs.length) * 10) / 10, count: rs.length };
+    }
+    return out;
+  }
+  async writePlaceReview({ placeKey, placeName, lat, lng, rating, body }) {
+    const me = this.requireUser();
+    if (!/^(node|way|relation)\/\d{1,16}$/.test(placeKey)) throw new BackendError('invalid', 'Unknown place.');
+    rating = Number(rating);
+    if (!(rating >= 1 && rating <= 5)) throw new BackendError('invalid', 'Choose a star rating from 1 to 5.');
+    body = (body || '').trim().slice(0, 500);
+    const list = this._reviews();
+    let r = list.find((x) => x.placeKey === placeKey && x.userId === me.id);
+    const now = new Date().toISOString();
+    if (!r) {
+      if (list.filter((x) => x.userId === me.id && sameDay(x.createdAt)).length >= 5) throw new BackendError('limit', 'You have written 5 reviews today — more tomorrow.');
+      r = { id: 'rv-' + uid(), placeKey, placeName: (placeName || '').slice(0, 120), lat, lng, userId: me.id, rating, body, createdAt: now, updatedAt: now, hidden: false, hiddenReason: null, reportCount: 0 };
+      list.push(r);
+    } else {
+      Object.assign(r, { rating, body, placeName: (placeName || r.placeName).slice(0, 120), updatedAt: now });
+      if (r.hiddenReason?.startsWith('reports:')) { r.hidden = false; r.hiddenReason = null; r.reportCount = 0; this.db.reviewReports = this.db.reviewReports.filter((x) => x.reviewId !== r.id); }
+    }
+    this.save();
+    return this._reviewView(r, me);
+  }
+  async deleteMyReview(id) {
+    const me = this.requireUser();
+    this.db.reviews = this._reviews().filter((r) => !(r.id === id && r.userId === me.id));
+    this.db.reviewReports = this.db.reviewReports.filter((x) => x.reviewId !== id);
+    this.save();
+  }
+  async reportReview(id, reason) {
+    const me = this.requireUser();
+    const r = this._reviews().find((x) => x.id === id);
+    if (!r) throw new BackendError('missing', 'That review no longer exists.');
+    if (r.userId === me.id) throw new BackendError('invalid', 'You cannot report your own review.');
+    if (!this.db.reviewReports.some((x) => x.reviewId === id && x.by === me.id)) this.db.reviewReports.push({ reviewId: id, by: me.id, reason: (reason || '').trim().slice(0, 300), at: new Date().toISOString() });
+    r.reportCount = this.db.reviewReports.filter((x) => x.reviewId === id).length;
+    if (r.reportCount >= 3 && !r.hidden) { r.hidden = true; r.hiddenReason = 'reports:' + r.reportCount; }
+    this.save();
+    return r.reportCount;
+  }
+  async myPlaceReviews() {
+    const me = this.requireUser();
+    return this._reviews().filter((r) => r.userId === me.id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
+      .map((r) => ({ id: r.id, placeKey: r.placeKey, placeName: r.placeName, lat: r.lat, lng: r.lng, rating: r.rating, body: r.body, updatedAt: r.updatedAt, hidden: r.hidden, hiddenReason: r.hiddenReason }));
+  }
+  async adminHiddenReviews() {
+    this.requireAdmin();
+    return this._reviews().filter((r) => r.hidden).sort((a, b) => b.createdAt.localeCompare(a.createdAt)).map((r) => ({
+      id: r.id, placeKey: r.placeKey, placeName: r.placeName, alias: this.aliasOf(r.userId), rating: r.rating, body: r.body, createdAt: r.createdAt, hiddenReason: r.hiddenReason, reportCount: r.reportCount,
+      reports: this.db.reviewReports.filter((x) => x.reviewId === r.id).map((x) => ({ alias: this.aliasOf(x.by), reason: x.reason, at: x.at })) }));
+  }
+  async adminSetReviewHidden(id, hidden, reason = '') {
+    const me = this.requireAdmin();
+    const r = this._reviews().find((x) => x.id === id);
+    if (!r) throw new BackendError('missing', 'That review no longer exists.');
+    if (hidden) { r.hidden = true; r.hiddenReason = 'moderator:' + (reason || '').trim().slice(0, 200); r.hiddenBy = me.id; }
+    else { r.hidden = false; r.hiddenReason = null; r.hiddenBy = null; r.reportCount = 0; this.db.reviewReports = this.db.reviewReports.filter((x) => x.reviewId !== id); }
+    this._ensurePoints?.(); this._logAdmin?.(hidden ? 'hide_review' : 'restore_review', r.userId, 'review:' + id, reason);
+    this.save();
+  }
 }
 Object.assign(LocalDemoBackend.prototype, socialMethods, pointsMethods);

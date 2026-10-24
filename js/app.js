@@ -5,7 +5,8 @@ import { state, set, subscribe, selectedRoute } from './state.js';
 import { GwMap } from './map.js';
 import { createRoutingProvider } from './providers/routing.js';
 import { createGeocoder, searchSamplePlaces, reverseGeocode } from './providers/geocoding.js';
-import { QUICK_FINDS, findNearby, prefetchNearby } from './providers/nearby.js';
+import { QUICK_FINDS, prefetchNearby } from './providers/nearby.js';
+import { openExplore, openCategory, clearExplore } from './ui/explore.js';
 import { SAMPLE_PLACES } from './providers/sampleData.js';
 import { createBackend } from './backend/index.js';
 import { ALERT_CATEGORIES } from './backend/rules.js';
@@ -172,7 +173,7 @@ async function refreshAlerts() {
       if (haversine([a.lat, a.lng], [here.lat, here.lng]) < 1500) toast(`${ALERT_CATEGORIES[a.category]?.emoji || '⚠️'} New community alert nearby: ${ALERT_CATEGORIES[a.category]?.label || 'report'}`);
     }
     ctx.refreshRouteSheet();
-    if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome();
+    if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin && !ctx.exploreOpen) showHome();
   } catch { /* offline: keep what we have */ } finally { alertsBusy = false; }
 }
 async function refreshData() {
@@ -184,14 +185,14 @@ async function refreshData() {
   ctx.map.renderPaths(paths, { showPending: state.layers.pending, myId: state.user?.id });
   if (ctx.lights?.visible()) ctx.lights.render();
   updateAvatar();
-  if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin) showHome({ keepState: true }); // background refresh: don't re-open a panel the user minimised
+  if (!state.destination && !state.navigating && !state.draw && !ctx.pickingOrigin && !ctx.exploreOpen) showHome({ keepState: true }); // background refresh: don't re-open a panel the user minimised
   refreshShares();
 }
 
 // ---------- home sheet ----------
 function showHome({ keepState = false } = {}) {
   set({ destination: null, routes: [], selectedRouteId: null, routeError: null });
-  ctx.map.clearRoutes(); ctx.map.setDestination(null); ctx.map.setOrigin(null);
+  ctx.map.clearRoutes(); ctx.map.setDestination(null); ctx.map.setOrigin(null); clearExplore(ctx);
   hideSheet(false); if (!keepState) collapse(false);
   const live = integrations.routing !== 'sample';
   const nearby = state.alerts.length;
@@ -205,7 +206,8 @@ function showHome({ keepState = false } = {}) {
            : 'Sample routes between these places; other destinations get a labelled straight-line estimate.'),
     el('div', { class: 'quick-label' }, 'Quick finds'),
     el('div', { class: 'quick-finds', role: 'list' },
-      ...QUICK_FINDS.map((c) => el('button', { class: 'btn sm quick', role: 'listitem', onclick: () => showNearby(c) }, c.emoji, ' ', c.label)),
+      el('button', { class: 'btn sm quick primary', role: 'listitem', onclick: () => openExplore(ctx) }, '🧭 Explore'),
+      ...QUICK_FINDS.map((c) => el('button', { class: 'btn sm quick', role: 'listitem', onclick: () => openCategory(ctx, c) }, c.emoji, ' ', c.label)),
       state.user ? el('button', { class: 'btn sm quick', role: 'listitem', onclick: () => openGoToFriend(ctx) }, '🫂 Go to a friend') : null),
     el('div', { class: 'row between', style: 'margin-bottom:6px' },
       el('div', { class: 'stat' }, el('strong', {}, String(nearby)), el('span', {}, 'active alerts nearby')),
@@ -215,31 +217,6 @@ function showHome({ keepState = false } = {}) {
       : el('div', { class: 'notice' }, 'Guest mode — routes are all yours. ',
           el('a', { href: '#', onclick: (e) => { e.preventDefault(); openAccount(ctx); } }, 'Sign in'), ' to report, add paths and earn points.'),
     el('p', { class: 'small', style: 'color:var(--text-3);margin:8px 0 0' }, 'Route labels describe what a route is built from — they are not safety ratings. Always use your own judgement.'),
-  ]);
-}
-
-async function showNearby(cat) {
-  const near = state.position ? [state.position.lat, state.position.lng] : ctx.map.center();
-  const title = `${cat.emoji} ${cat.label} near ${state.position ? 'you' : 'here'}`;
-  const back = el('button', { class: 'btn sm ghost', onclick: () => showHome() }, 'Back');
-  hideSheet(false); collapse(false);
-  if (!state.online) { renderSheet([el('div', { class: 'sheet-title' }, el('h2', {}, title), back), el('div', { class: 'empty' }, 'You are offline — nearby search needs a connection.')]); return; }
-  renderSheet([el('div', { class: 'sheet-title' }, el('h2', {}, title), back), el('div', { class: 'loading-row' }, el('span', { class: 'spinner' }), 'Searching OpenStreetMap…')]);
-  let places;
-  try { places = await findNearby(cat, near); }
-  catch (e) { if (e.name === 'AbortError') return; renderSheet([el('div', { class: 'sheet-title' }, el('h2', {}, title), back), el('div', { class: 'empty' }, 'Nearby search is unavailable right now. Try again in a moment.')]); return; }
-  if (state.destination) return; // user moved on
-  renderSheet([
-    el('div', { class: 'sheet-title' }, el('h2', {}, title), back),
-    places.length
-      ? el('div', { class: 'list' }, ...places.slice(0, 20).map((p) => el('button', { class: 'item', style: 'text-align:left;border:0;width:100%', onclick: () => setDestination(p) },
-          el('div', { class: 'emoji' }, cat.emoji),
-          el('div', { class: 'body' },
-            el('div', { class: 't' }, p.name),
-            el('div', { class: 's' }, p.sub || cat.label),
-            el('div', { class: 'meta' }, el('span', { class: 'chip' }, fmtDistance(p.dist)))))))
-      : el('div', { class: 'empty' }, el('div', { class: 'big' }, cat.emoji), `Nothing tagged as ${cat.label.toLowerCase()} within 1 km on OpenStreetMap.`),
-    el('p', { class: 'small muted', style: 'margin-top:8px' }, 'Results © OpenStreetMap contributors. Tap one to route there.'),
   ]);
 }
 

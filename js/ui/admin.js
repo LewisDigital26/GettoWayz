@@ -4,6 +4,7 @@ import { state } from '../state.js';
 import { ALERT_CATEGORIES, PATH_TYPES, SURFACES, POINT_RULE_MAP } from '../backend/rules.js';
 import { openModal, closeModal } from './modal.js';
 import { toast } from './sheet.js';
+import { hiddenReviewsSection } from './explore.js';
 
 export async function openAdmin(ctx, opts = {}) {
   if (state.user?.role !== 'admin') { toast('Moderators only', 'error'); return; }
@@ -92,6 +93,8 @@ export async function openAdmin(ctx, opts = {}) {
       el('button', { class: 'btn sm primary', onclick: () => grant(1) }, 'Add points'),
       el('button', { class: 'btn sm ghost', onclick: () => grant(-1) }, 'Remove points')));
 
+  ctx.reopenAdmin = () => openAdmin(ctx);
+  const reviewNodes = await hiddenReviewsSection(ctx);
   openModal('Moderation queue', [
     el('p', { class: 'muted small' }, 'Approve only paths that are clearly public and legal to use. Approval adds the path to the community map and awards points to the contributor. Verifying an alert awards points to the reporter and anyone who confirmed it. Every action is logged.'),
     el('h3', { style: 'font-size:15px;margin:10px 0 6px' }, `Path suggestions (${pendingPaths.length})`),
@@ -101,6 +104,7 @@ export async function openAdmin(ctx, opts = {}) {
     el('h3', { style: 'font-size:15px;margin:16px 0 6px' }, `Trips held for review (${trips.length})`),
     el('p', { class: 'muted small' }, 'Trips that looked too fast for their travel mode. No locations are stored — only the summary below. Approve only if it looks plausible.'),
     trips.length ? el('div', { class: 'list' }, ...trips.map(tripCard)) : el('div', { class: 'empty' }, 'No trips to check.'),
+    ...reviewNodes,
     el('h3', { id: 'adminGrant', style: 'font-size:15px;margin:16px 0 6px' }, 'Add or remove points'),
     el('p', { class: 'muted small' }, 'For testing, or to fix a mistake. Up to 1000 at a time. Each change is logged, shows in that user’s points history with your reason, and can be reversed below. Moderators appear on leaderboards like anyone else once they opt in.'),
     grantForm,

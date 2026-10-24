@@ -350,6 +350,32 @@ table.rules td:last-child { text-align: right; font-weight: 700; color: var(--ac
 .gw-pin.alert.pending { border-color: var(--pending); }
 .gw-pin.traffic { background: #2a2d3a; border-color: #ffb020; }
 .gw-pin.traffic.closed { border-color: #ff4d4f; }
+/* Explore places — shape per group (round food · square shops · diamond services · leaf out & about) + emoji per category */
+.place-marker { width: 34px; height: 34px; display: grid; place-items: center; background: var(--bg-2); border: 2px solid var(--teal); box-shadow: 0 3px 8px rgba(0,0,0,.45); position: relative; cursor: pointer; }
+.place-marker > span { font-size: 16px; line-height: 1; }
+.place-marker.round { border-radius: 50%; }
+.place-marker.square { border-radius: 7px; }
+.place-marker.diamond { border-radius: 6px; transform: rotate(45deg); } .place-marker.diamond > span, .place-marker.diamond > i { transform: rotate(-45deg); }
+.place-marker.leaf { border-radius: 50% 4px 50% 4px; }
+.place-marker.active { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 22%, var(--bg-2)); transform: scale(1.18); z-index: 2; }
+.place-marker.diamond.active { transform: rotate(45deg) scale(1.18); }
+.place-marker > i { position: absolute; right: -10px; top: -8px; font-style: normal; font-size: 10px; font-weight: 800; background: var(--accent); color: var(--navy, #202b47); border-radius: 999px; padding: 1px 5px; line-height: 1.3; }
+.cat-groups { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.cat-group .quick-label { margin-top: 2px; }
+.stars { display: inline-flex; gap: 2px; letter-spacing: 1px; color: #ffc53d; font-size: 14px; }
+.stars.muted { color: var(--text-3); }
+.star-pick { display: flex; gap: 4px; margin: 4px 0 10px; }
+.star-pick button { background: none; border: 0; font-size: 30px; line-height: 1; cursor: pointer; color: var(--text-3); padding: 2px; }
+.star-pick button.on { color: #ffc53d; }
+.star-pick button:focus-visible { outline: 2px solid var(--accent); border-radius: 6px; }
+.facts { display: grid; gap: 6px; margin: 8px 0 12px; }
+.facts .fact { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; }
+.facts .fact .ico { flex: none; width: 22px; text-align: center; }
+.facts .fact .k { color: var(--text-3); font-size: 12px; }
+.review { background: var(--bg-3); border-radius: var(--radius-sm); padding: 10px 12px; }
+.review.hidden { opacity: .7; border-left: 3px solid var(--pending); }
+.review .who { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 13px; }
+.review .body { margin: 6px 0 4px; white-space: pre-wrap; word-break: break-word; }
 .flow-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 4px; vertical-align: middle; }
 .flow-dot.free { background: #3fbf5f; } .flow-dot.slow { background: #ffb020; } .flow-dot.jam { background: #ff4d4f; }
 .traffic-tiles { opacity: .75; }

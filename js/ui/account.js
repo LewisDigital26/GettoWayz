@@ -7,6 +7,7 @@ import { openGuide, policy, chip, CONTRIB_STATUS, contribTitle } from './points.
 import { openModal, closeModal } from './modal.js';
 import { toast } from './sheet.js';
 import { openAdmin } from './admin.js';
+import { openMyReviews } from './explore.js';
 import { openFriends, liveSharingCard } from './friends.js';
 import { avatar } from './avatar.js';
 import { updateProfileTab } from './tabs.js';
@@ -220,6 +221,7 @@ export async function renderProfilePage(ctx, page) {
 
   const app = group('set-app', 'App',
     setRow('📜', 'How points work', 'Rules, trip checks, levels and leaderboards', null, { onclick: () => openGuide(ctx) }),
+    setRow('✍️', 'My reviews', 'Places you have reviewed in Explore', null, { onclick: () => openMyReviews(ctx) }),
     u.role === 'admin' ? setRow('🛠️', 'Moderation & points review', 'Review reports, paths, held trips and reversals', null, { onclick: () => openAdmin(ctx) }) : null,
     u.role === 'admin' ? setRow('➕', 'Add test points', 'Moderators: add or remove points for any user (logged)', null, { onclick: () => openAdmin(ctx, { focus: 'grant' }) }) : null,
     ctx.backend.resetDemo ? setRow('♻️', 'Reset demo data', 'Clears everything stored on this device', null, { onclick: () => { if (confirm('Reset all demo data on this device?')) { ctx.backend.resetDemo(); toast('Demo data reset'); ctx.showHome(); ctx.refreshPage(); } } }) : null,

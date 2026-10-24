@@ -84,6 +84,14 @@ Two sources, both free at test-app scale:
 
 Before a public launch, move the TomTom incidents call behind a Supabase Edge Function so the key is not shipped in `config.local.js`.
 
+### Explore nearby & community reviews
+
+- **Explore** (home sheet → 🧭 Explore, or any quick-find chip) lists places within 1 km in ~24 categories across four groups (food & drink, shops, services, out & about), straight from OpenStreetMap via Overpass — no key, no cost. Results are cached 10 min per spot and the three most-used categories are prefetched when the home sheet opens. Markers use a **shape per group plus the category emoji**, so categories are told apart by more than colour.
+- **Place sheet**: directions, and whatever OSM knows (hours, address, phone, website, step-free access, takeaway, outdoor seating, fees). Nothing is invented — if OSM has no detail, it says so.
+- **Reviews** (`supabase/migration-008-place-reviews.sql`, `js/ui/explore.js`): signed-in members can leave 1–5 stars and up to 500 characters. One review per person per place (writing again replaces it), 5 new reviews a day. Other members can report a review once; **three reports hide it automatically** until a moderator restores it or keeps it hidden (Moderation queue › Hidden reviews, logged in `admin_actions`). A moderator hide survives edits; a report-driven hide is cleared when the author edits (reports reset, so it gets a fresh look). Profile › My reviews lists yours.
+- **Reviews never earn points.** Nothing in the reviews code calls the points functions — it's on purpose, to keep reviews honest.
+- **Privacy**: a review stores only the place's own public OSM coordinates, never where the reviewer was. Aliases are shown; emails never are.
+
 ### Scooter mode
 
 No public routing engine has a scooter profile. Scooter mode uses the cycling network with scooter speed estimates and says so in the route basis. Check local rules on where e-scooters may be ridden.
@@ -93,7 +101,7 @@ No public routing engine has a scooter profile. Scooter mode uses the cycling ne
 Everything — accounts, alerts, paths, points, friends, live sharing, trip rewards — runs on one free Supabase project.
 
 1. **Create a project** at supabase.com (Ireland / eu-west-1 is fine for the UK).
-2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`, then `supabase/migration-005-manual-points.sql`, then `supabase/migration-006-realtime-alerts.sql`, then `supabase/migration-007-mods-on-leaderboard.sql`. New projects run schema.sql, then 002 to 007 in order.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
+2. **Run the schema**: open the SQL editor, paste all of `supabase/schema.sql`, Run. (Projects created before these features were added: also run `supabase/migration-002-streetlights.sql` then `supabase/migration-003-route-sharing.sql`, then `supabase/migration-004-points.sql`, then `supabase/migration-005-manual-points.sql`, then `supabase/migration-006-realtime-alerts.sql`, then `supabase/migration-007-mods-on-leaderboard.sql`, then `supabase/migration-008-place-reviews.sql`. New projects run schema.sql, then 002 to 008 in order.) If it reports `pg_cron not available`, enable it under *Database → Extensions* and re-run the last `do $$ … $$` block (it expires sessions every minute even when nobody is online; without it they still expire on the next read).
 3. **Keys**: *Project Settings → API*. Copy the Project URL and the **anon / publishable** key (never the `service_role` key).
 4. **Config**: copy `config.example.js` → `config.local.js`:
    ```js

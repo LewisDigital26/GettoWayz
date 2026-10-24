@@ -241,6 +241,30 @@ export class SupabaseBackend {
   async stopShare(id, reason = 'stopped') { await this.rpc('set_share_status', { p_share: id, p_status: 'ended', p_reason: reason }); this.emit(); }
   async updateSharePosition(id, { lat, lng }) { await this.rpc('update_share_position', { p_share: id, p_lat: lat, p_lng: lng }); }
   async listReports() { const { data, error } = await this.sb.from('reports').select('*'); if (error) throw wrap(error); return data; }
+
+  // ---------- place reviews (migration-008). Reviews never earn points. ----------
+  rowToReview(r) {
+    return { id: r.id, userId: r.user_id, alias: r.alias, rating: r.rating, body: r.body || '', createdAt: r.created_at, updatedAt: r.updated_at || r.created_at,
+      hidden: !!r.hidden, hiddenReason: r.hidden_reason || null, reportCount: r.report_count || 0, reportedByMe: !!r.reported_by_me, mine: r.user_id === this.profile?.id };
+  }
+  async listPlaceReviews(placeKey) { return ((await this.rpc('place_reviews_for', { p_place_key: placeKey })) || []).map((r) => this.rowToReview(r)); }
+  async placeReviewSummary(keys) {
+    const rows = keys.length ? await this.rpc('place_review_summary', { p_keys: keys.slice(0, 60) }).catch(() => []) : [];
+    return Object.fromEntries((rows || []).map((r) => [r.place_key, { avg: Number(r.avg_rating), count: Number(r.review_count) }]));
+  }
+  async writePlaceReview({ placeKey, placeName, lat, lng, rating, body }) {
+    const r = await this.rpc('upsert_place_review', { p_place_key: placeKey, p_place_name: placeName, p_lat: lat, p_lng: lng, p_rating: rating, p_body: body });
+    this.emit(); return this.rowToReview({ ...r, alias: this.profile?.alias });
+  }
+  async deleteMyReview(id) { const { error } = await this.sb.from('place_reviews').delete().eq('id', id).eq('user_id', this.requireUser().id); if (error) throw wrap(error); this.emit(); }
+  async reportReview(id, reason) { return this.rpc('report_review', { p_review: id, p_reason: reason }); }
+  async myPlaceReviews() {
+    return ((await this.rpc('my_place_reviews', {})) || []).map((r) => ({ id: r.id, placeKey: r.place_key, placeName: r.place_name, lat: r.lat, lng: r.lng, rating: r.rating, body: r.body || '', updatedAt: r.updated_at, hidden: !!r.hidden, hiddenReason: r.hidden_reason }));
+  }
+  async adminHiddenReviews() {
+    return ((await this.rpc('admin_hidden_reviews', {})) || []).map((r) => ({ id: r.id, placeKey: r.place_key, placeName: r.place_name, alias: r.alias, rating: r.rating, body: r.body || '', createdAt: r.created_at, hiddenReason: r.hidden_reason, reportCount: r.report_count, reports: r.reports || [] }));
+  }
+  async adminSetReviewHidden(id, hidden, reason = '') { await this.rpc('admin_set_review_hidden', { p_review: id, p_hidden: !!hidden, p_reason: reason }); this.emit(); }
 }
 
 /** Realtime provider: fires whenever a share row the signed-in user may read changes (RLS scopes the stream). */
