@@ -452,6 +452,9 @@ body:has(.sharebanner:not([hidden])) .mapctl { top: calc(156px + var(--share-h, 
 .lightbar { display: flex; height: 8px; border-radius: 4px; overflow: hidden; background: var(--bg); margin: 6px 0 4px; }
 .lightbar i { display: block; height: 100%; }
 .lightbar .c { background: #ffd34d; } .lightbar .o { background: #ff5a7a; } .lightbar .u { background: #8a93ad; } .lightbar .n { background: transparent; }
+.lightbar .l { background: rgba(255,211,77,.45); } .lightbar .d { background: repeating-linear-gradient(90deg, #ff5a7a 0 4px, transparent 4px 7px); }
+.lg-street { display: inline-block; width: 22px; height: 0; border-top: 5px solid rgba(255,211,77,.5); border-radius: 3px; }
+.lg-street.dark { border-top: 3px dashed #ff5a7a; }
 .lightkey { display: flex; gap: 10px; flex-wrap: wrap; font-size: 11.5px; color: var(--text-2); }
 .lightkey i { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
 .modebar button { padding: 0 10px; }

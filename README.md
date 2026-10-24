@@ -68,9 +68,12 @@ Drive uses the provider's car profile (`driving-car` on OpenRouteService, `drivi
 
 - **Layer control**: map layers (⧉ button) → Streetlights: *Auto (night)* / *On* / *Off*. Auto turns the layer on between sunset and sunrise, computed locally. The badge shows the next sunrise/sunset. Preference is stored on the device.
 - **Lamp status** (derived in `deriveLampStatus`): 🟡 *Recently confirmed working* — a `light_ok` report within 14 days; 🔴 *Reported out* — latest report is `light_out` (30-day expiry); ⚪ *Unknown / not verified* — no current report. Tapping a lamp shows the status, when it was last reported, moderator verification, and the report history, plus **Seen it working** / **Report out**.
-- **Reports** go through the normal alert system: 5/day, no duplicates per category within 25 m, expire automatically, moderators verify, points only on verification or 2+ confirmations. Zoom ≥ 15 to load lamps; the Overpass query is bounded to the visible area (padded) and cached 10 min.
+- **Reports** go through the normal alert system: 5/day, no duplicates per category within 25 m, expire automatically, moderators verify, points only on verification or 2+ confirmations. Zoom ≥ 15 to show lamps.
 - **Routing at night**: each route is scored by sampling every 25 m and checking lamps within 30 m — *confirmed* / *reported out* / *unknown* / *no data*. The route card shows `🔦 N% lit·confirmed` and the sheet shows a bar with all four shares and a plain-language sentence (e.g. "66% has no lamp data at all"). On the map the selected route gets a thin warm overlay on confirmed stretches and red on reported-out ones. **Prefer routes with confirmed lighting** appears only at night and only when at least one route has ≥ 20% confirmed coverage; it ranks routes by that share and labels the best "Most confirmed lighting". Nothing is ever described as safe.
 - **Privacy**: lamps are fetched for the map view, not the user's position; no route or location history is stored.
+- **Lamp positions** come from `data/coventry-lamps.json`, a snapshot of OpenStreetMap `highway=street_lamp` nodes refreshed every Monday by `.github/workflows/lamps.yml` (`scripts/fetch-lamps.mjs`). Outside the Coventry box the app falls back to live Overpass. OSM has only ~500 lamps mapped in Coventry (the council runs ~31,400), so a council FOI dataset can later replace this file as-is.
+- **Lit / unlit streets**: `data/coventry-lit.json` (same weekly workflow, `scripts/fetch-lit.mjs`) holds every road/path tagged `lit=yes`/`lit=no` — about a third of the city's 4,100 km walkable network (Oct 2026: 1,071 km lit, 195 km unlit). Drawn at zoom ≥ 15 as an amber glow (lit) or red dashes (dark). Tap a street → **It's lit** / **It's dark** files a `street_lit` / `street_dark` report (180-day expiry, normal 5/day limit). A report changes the street's colour only once it's **trusted**: verified by a moderator or confirmed by 2+ other people. Route scoring counts lit/dark streets after confirmed or reported-out lamps.
+- **Street lighting points**: `street_lighting_confirmed` +3 (cap 15/day) to the reporter and `confirm_helpful` +2 to each confirmer, paid once when the 2nd confirmation lands or a moderator verifies — whichever comes first. Needs `supabase/migration-009-street-lighting.sql` on the live backend.
 
 ### Live traffic (cheapest setup)
 
@@ -165,6 +168,7 @@ All values live in **one place**: `js/backend/pointsPolicy.js`, which is used by
 | Missing path approved by a moderator | +25 | 75 |
 | Hazard report verified by a moderator | +8 | 40 |
 | Streetlight report verified by a moderator | +3 | 15 |
+| Street lighting report (lit/dark) verified **or** confirmed by 2+ people | +3 | 15 |
 | You confirmed a report that was then verified | +2 | 10 |
 | Verified trip completed: walk, bike or scooter | +4 | 16 completion pts/day (4 trips) |
 | Verified drive completed (no distance bonus) | +2 | shares the cap above |

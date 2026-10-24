@@ -21,6 +21,7 @@ export const RULES = {
   path_approved:        { label: 'Missing path approved by a moderator', group: 'Map contributions', points: 25, dailyCap: 75 },
   alert_verified:       { label: 'Hazard report verified by a moderator', group: 'Map contributions', points: 8, dailyCap: 40 },
   streetlight_verified: { label: 'Streetlight report verified by a moderator', group: 'Map contributions', points: 3, dailyCap: 15 },
+  street_lighting_confirmed: { label: 'Street lighting report verified or confirmed by 2+ people', group: 'Map contributions', points: 3, dailyCap: 15 },
   confirm_helpful:      { label: 'You confirmed a report that was then verified', group: 'Map contributions', points: 2, dailyCap: 10 },
   trip_completed:       { label: 'Completed a verified trip', group: 'Trips', points: 4, dailyCap: 16 },      // 4 rewarded trips/day
   trip_distance:        { label: 'Distance bonus for a verified trip', group: 'Trips', points: null, dailyCap: 30 }, // points from TRIP.bands
@@ -32,7 +33,10 @@ export const RULES = {
 };
 
 /** Which verification rule applies to an alert category. */
-export const ALERT_AWARD_RULE = (category) => (category === 'light_out' || category === 'light_ok' ? 'streetlight_verified' : 'alert_verified');
+export const ALERT_AWARD_RULE = (category) => (category === 'light_out' || category === 'light_ok' ? 'streetlight_verified'
+  : category === 'street_lit' || category === 'street_dark' ? 'street_lighting_confirmed' : 'alert_verified');
+/** Street lighting reports also pay out (once) when this many other people confirm them — no moderator needed. */
+export const STREET_CONFIRMATIONS_TO_AWARD = 2;
 
 /**
  * Trips. Points are only awarded for a trip the server could check:

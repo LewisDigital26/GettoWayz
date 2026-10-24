@@ -6,6 +6,7 @@ import { BackendError, haversine, uid, lineLength } from '../util.js';
 import { buildSeed, SEED_VERSION } from './seed.js';
 import { ALERT_CATEGORIES, RATE_LIMITS, CONFIRMATIONS_TO_AUTO_FLAG } from './rules.js';
 import { pointsMethods, ALERT_AWARD_RULE } from './demoPoints.js';
+import { STREET_CONFIRMATIONS_TO_AWARD } from './pointsPolicy.js';
 import { socialMethods, makeGwId } from './social.js';
 
 const KEY = 'ghetto-wayz:demo-db:v2';
@@ -138,7 +139,13 @@ export class LocalDemoBackend {
     if (a.confirmations.includes(user.id)) throw new BackendError('dupe', 'Already confirmed.');
     const todays = this.db.alerts.reduce((n, x) => n + (x.confirmations.includes(user.id) && sameDay(x.createdAt) ? 1 : 0), 0);
     if (todays >= RATE_LIMITS.confirmationsPerDay) throw new BackendError('rate', 'Confirmation limit reached for today.');
-    a.confirmations.push(user.id); // no points here — confirmations only count if a moderator verifies the report
+    a.confirmations.push(user.id); // no points for confirming on its own — only if the report is verified
+    // Street lighting reports pay out once enough other people confirm them (same rule as confirm_alert in SQL).
+    if (ALERT_CATEGORIES[a.category]?.street && a.confirmations.length >= STREET_CONFIRMATIONS_TO_AWARD) {
+      this.award(a.createdBy, ALERT_AWARD_RULE(a.category), 'alert', a.id);
+      for (const uid_ of a.confirmations) this.award(uid_, 'confirm_helpful', 'alert', a.id);
+      this._ensurePoints();
+    }
     this.save();
     return a;
   }

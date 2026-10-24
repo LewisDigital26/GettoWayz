@@ -160,10 +160,13 @@ export function deriveLampStatus(lamp, alerts, now = Date.now()) {
  *   confirmed (a lamp recently confirmed working) > out (nearest lamp reported out) > unknown (lamp present, no report) > nodata (no lamp known)
  * `covered` is false when lamp data was not loaded for the route's area at all.
  */
-export function scoreRouteLighting(geometry, lamps, statusOf, { covered = true } = {}) {
-  const counts = { confirmed: 0, out: 0, unknown: 0, nodata: 0 };
+export function scoreRouteLighting(geometry, lamps, statusOf, { covered = true, streetAt = null } = {}) {
+  // Classes, best first: confirmed (lamp recently seen working) > out (lamp reported out) >
+  // streetLit / streetDark (street tagged lit/unlit on OSM, or a trusted community street report) >
+  // unknown (a lamp is mapped, status unknown) > nodata.
+  const counts = { confirmed: 0, out: 0, streetLit: 0, streetDark: 0, unknown: 0, nodata: 0 };
   const segments = []; // [{ a:[lat,lng], b:[lat,lng], cls }]
-  if (!covered || !geometry || geometry.length < 2) return { covered: false, pct: { confirmed: 0, out: 0, unknown: 0, nodata: 100 }, samples: 0, segments };
+  if (!covered || !geometry || geometry.length < 2) return { covered: false, pct: { confirmed: 0, out: 0, streetLit: 0, streetDark: 0, unknown: 0, nodata: 100 }, samples: 0, segments };
   const r = STREETLIGHTS.routeRadiusM;
   const classify = (pt) => {
     let best = 'nodata';
@@ -174,6 +177,10 @@ export function scoreRouteLighting(geometry, lamps, statusOf, { covered = true }
       if (s === 'out' && best !== 'confirmed') best = 'out';
       else if (s === 'unknown' && best === 'nodata') best = 'unknown';
     }
+    if (best === 'out') return best;
+    const street = streetAt?.(pt);
+    if (street === 'lit') return 'streetLit';
+    if (street === 'dark') return 'streetDark';
     return best;
   };
   let total = 0;

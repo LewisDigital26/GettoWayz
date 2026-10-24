@@ -25,6 +25,17 @@ export const ALERT_CATEGORIES = {
   // Streetlight reports — attached to a lamp on the streetlight layer. Status is derived from these, never assumed.
   light_out: { label: 'Streetlight out', emoji: '🔦', desc: 'This lamp is not working', expiryDays: 30, lamp: true },
   light_ok:  { label: 'Streetlight working', emoji: '💡', desc: 'Seen working recently', expiryDays: 14, lamp: true },
+  // Street lighting — "this street is lit / dark at night". Recolours the street on the lit-streets layer once
+  // trusted (moderator verified or 2+ confirmations). Works on any street, tagged on OpenStreetMap or not.
+  street_lit:  { label: 'Street is lit',  emoji: '🔆', desc: 'Lit at night along this stretch', expiryDays: 180, street: true },
+  street_dark: { label: 'Street is dark', emoji: '🌑', desc: 'No working lights along this stretch', expiryDays: 180, street: true },
+};
+
+// Lit-streets layer rules
+export const STREET_LIGHTING = {
+  matchRadiusM: 15,          // a street report within this distance of a street is about that street
+  routeRadiusM: 15,          // a route sample within this distance of a tagged street takes its lighting
+  confirmationsToTrust: 2,   // community confirmations that make a report count (and earn points)
 };
 
 // Streetlight layer rules

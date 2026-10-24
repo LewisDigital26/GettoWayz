@@ -76,7 +76,7 @@ export const pointsMethods = {
     this._ensurePoints();
     const me = this.requireUser();
     const award = (type, id, rules) => { const e = this.db.points.find((x) => x.userId === me.id && x.refType === type && x.refId === id && rules.includes(x.rule)); return e ? { status: e.status, points: e.points } : null; };
-    const alerts = this.db.alerts.filter((a) => a.createdBy === me.id).map((a) => ({ kind: 'alert', id: a.id, category: a.category, status: a.status, createdAt: a.createdAt, award: award('alert', a.id, ['alert_verified', 'streetlight_verified']) }));
+    const alerts = this.db.alerts.filter((a) => a.createdBy === me.id).map((a) => ({ kind: 'alert', id: a.id, category: a.category, status: a.status, createdAt: a.createdAt, award: award('alert', a.id, ['alert_verified', 'streetlight_verified', 'street_lighting_confirmed']) }));
     const paths = this.db.paths.filter((p) => p.createdBy === me.id).map((p) => ({ kind: 'path', id: p.id, name: p.name, status: p.status, createdAt: p.createdAt, message: p.reviewMessage, award: award('path', p.id, ['path_approved']) }));
     return [...alerts, ...paths].sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt)).slice(0, 60);
   },

@@ -204,10 +204,37 @@ export class GwMap {
   renderLightingOverlay(segments) {
     this.lightOverlay.clearLayers();
     if (!segments) return;
-    const colors = { confirmed: '#ffd34d', out: '#ff5a7a' };
+    const style = {
+      confirmed:  { color: '#ffd34d', opacity: .95 },
+      out:        { color: '#ff5a7a', opacity: .95 },
+      streetLit:  { color: '#ffd34d', opacity: .5 },
+      streetDark: { color: '#ff5a7a', opacity: .6, dashArray: '4 6' },
+    };
     for (const sg of segments) {
-      if (!colors[sg.cls]) continue;
-      L.polyline([sg.a, sg.b], { color: colors[sg.cls], weight: 3, opacity: .95, interactive: false, lineCap: 'butt' }).addTo(this.lightOverlay);
+      const s = style[sg.cls];
+      if (!s) continue;
+      L.polyline([sg.a, sg.b], { ...s, weight: 3, interactive: false, lineCap: 'butt' }).addTo(this.lightOverlay);
+    }
+  }
+
+  // ----- lit / unlit streets (OpenStreetMap lit=* + trusted community reports) -----
+  showLitStreets(show) {
+    this.litLayer ||= L.layerGroup();
+    show ? this.litLayer.addTo(this.map) : this.litLayer.remove();
+  }
+  /** streets: Street[] (providers/litStreets.js); statusOf(street) → { lit, source }; onClick(street, status, [lat,lng]) */
+  renderLitStreets(streets, statusOf, onClick) {
+    this.litLayer ||= L.layerGroup();
+    this.litRenderer ||= L.canvas({ padding: 0.3, tolerance: 10 });   // canvas: thousands of lines stay smooth; tolerance = easy tapping
+    this.litLayer.clearLayers();
+    for (const st of streets) {
+      const s = statusOf(st);
+      const community = s.source === 'community';
+      const line = L.polyline(st.coords, s.lit
+        ? { renderer: this.litRenderer, color: '#ffd34d', weight: community ? 6 : 5, opacity: community ? .75 : .38, lineCap: 'round' }
+        : { renderer: this.litRenderer, color: '#ff5a7a', weight: community ? 4 : 3, opacity: community ? .9 : .7, dashArray: '5 7', lineCap: 'butt' });
+      line.on('click', (e) => { L.DomEvent.stopPropagation(e); onClick?.(st, s, [e.latlng.lat, e.latlng.lng]); });
+      line.addTo(this.litLayer);
     }
   }
 
