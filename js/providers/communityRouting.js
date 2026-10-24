@@ -107,7 +107,9 @@ export async function communityRoutes({ routing, from, to, mode, paths, base }) 
   const live = base.filter((r) => r.source === 'live');
   if (!live.length) return [];
   const quickest = live.reduce((a, b) => (a.durationS <= b.durationS ? a : b));
-  const exclude = new Set(base.flatMap((r) => r.communityPathIds || []));
+  // Only skip paths a route is explicitly stitched along. "Looks like it runs along it" (proximity) is not enough:
+  // a footpath drawn a few metres beside a road reads as used even when the route stays on the road.
+  const exclude = new Set(base.flatMap((r) => (r.viaCommunity ? [r.viaCommunity.pathId] : [])));
   const cands = pickCandidates({ from, to, mode, paths, baseDistanceM: quickest.distanceM, exclude });
   if (!cands.length) return [];
   const providerLabel = routing.name === 'osrm' ? 'OSRM' : 'OpenRouteService';

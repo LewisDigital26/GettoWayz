@@ -786,3 +786,4 @@ a.btn { text-decoration: none; }
 .badge .bn { font-weight: 700; font-size: 13px; margin-top: 4px; }
 .badge .bd { font-size: 11px; color: var(--text-2); margin-top: 2px; }
 .tripcard-canvas { width: 100%; height: auto; border-radius: 16px; display: block; }
+.navbar-warn { color: var(--pending); margin-top: 2px; }

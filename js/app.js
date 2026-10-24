@@ -21,7 +21,7 @@ import { createStreetlightProvider } from './providers/streetlights.js';
 import { Streetlights, lightingBlock } from './ui/streetlights.js';
 import { createTraffic } from './providers/traffic.js';
 import { Traffic, trafficRow } from './ui/traffic.js';
-import { STREETLIGHTS } from './backend/rules.js';
+import { STREETLIGHTS, COMMUNITY_ROUTING, LOCATION } from './backend/rules.js';
 import { communityRoutes } from './providers/communityRouting.js';
 import { TRIP } from './backend/pointsPolicy.js';
 import { showTripResult, renderLeaderboardPage } from './ui/points.js';
@@ -300,6 +300,12 @@ async function setDestination(place) {
   }
 }
 
+/** Tap-the-map start point: the sheet shrinks out of the way and a toast says what to do. */
+function chooseStartOnMap() {
+  ctx.pickingOrigin = true;
+  collapse(true);
+  toast('Tap the map where you are starting from');
+}
 function showOriginPicker() {
   hideSheet(false); collapse(false);
   renderSheet([
@@ -353,6 +359,7 @@ function locate({ thenRoute = false, follow = false, onFirst = null } = {}) {
     set({ position: pos, locationStatus: 'ok' });
     ctx.map.setMe(pos);
     if (first || !follow) ctx.map.flyTo([pos.lat, pos.lng], 16);
+    if (first && pos.accuracy > LOCATION.approximateM) toast(`Your location is approximate (±${Math.round(pos.accuracy)} m). You can choose your start on the map.`);
     if (thenRoute && state.destination && first) {
       set({ origin: { lat: pos.lat, lng: pos.lng, name: 'Your location', source: 'gps' } });
       ctx.map.setOrigin(null);
@@ -406,7 +413,7 @@ async function planRoute() {
     const result = await ctx.routing.route({ from: [origin.lat, origin.lng], to: [dest.lat, dest.lng], mode: state.mode });
     if (state.destination !== dest) return; // stale
     if (result.unsupported) throw new Error(result.unsupported);
-    const routes = annotateRoutes(result.routes);
+    const routes = annotateRoutes(result.routes).sort((a, b) => preferRank(a) - preferRank(b));
     set({ routes, routeProvider: result.provider, selectedRouteId: routes[0]?.id || null, routing: false });
     applyRoutePrefs();
     applyRouteTraffic(routes);
@@ -429,7 +436,7 @@ async function addCommunityRoutes(routes, from, to, mode) {
   const extra = await communityRoutes({ routing: ctx.routing, from, to, mode, paths: state.paths, base: routes }).catch(() => []);
   if (!extra.length || state.routes !== routes || state.navigating) return state.routes;
   const keepSelection = state.selectedRouteId !== routes[0]?.id; // user already picked one — don't move it
-  const all = annotateRoutes([...routes, ...extra]).sort((a, b) => routeRank(a) - routeRank(b));
+  const all = annotateRoutes([...routes, ...extra]).sort((a, b) => preferRank(a) - preferRank(b));
   set({ routes: all, selectedRouteId: keepSelection ? state.selectedRouteId : all[0].id });
   applyRoutePrefs();
   ctx.map.renderRoutes(all, state.selectedRouteId, state.mode, selectRoute, { fit: false });
@@ -449,6 +456,15 @@ function densify(line, step) {
 
 /** Sort key for "quickest": travel time including live traffic; a route through a closed road goes last. */
 const routeRank = (r) => r.durationS + (r.roadClosed ? 1e7 : 0);
+/**
+ * Default order: quickest first, except a route along community paths (that nobody has reported blocked)
+ * moves ahead when it's at most 15% / 90 s slower — using the community's paths is the point of the app.
+ */
+function preferRank(r) {
+  const usesCommunity = r.source !== 'estimate' && (r.communityPathIds?.length || 0) > (r.blockedPathIds?.length || 0);
+  const bonus = usesCommunity && state.mode !== 'drive' ? Math.min(COMMUNITY_ROUTING.preferWithinS, r.durationS * COMMUNITY_ROUTING.preferWithinPct) : 0;
+  return routeRank(r) - bonus;
+}
 
 /**
  * Driving: fetch live incidents for the area the route options cover, add their delays to each route's time,
@@ -460,7 +476,7 @@ async function applyRouteTraffic(routes) {
   const got = await ctx.trafficUi.fetchForRoutes(routes);
   if (!got || state.destination !== dest || state.navigating || !state.routes.length) return;
   annotateRoutes(state.routes);
-  state.routes.sort((a, b) => routeRank(a) - routeRank(b));
+  state.routes.sort((a, b) => preferRank(a) - preferRank(b));
   set({ routes: [...state.routes], selectedRouteId: ctx.routePicked ? state.selectedRouteId : state.routes[0].id });
   ctx.map.renderRoutes(state.routes, state.selectedRouteId, state.mode, selectRoute, { fit: false });
   renderRouteSheet();
@@ -475,7 +491,7 @@ function annotateRoutes(routes) {
       // Sample along the path every ~5 m: a route only "uses" a path if it actually runs along most of it,
       // not just past its two ends (short cut-throughs otherwise look used by any route around them).
       const pts = densify(p.points, 5);
-      const hits = pts.filter((pt) => distanceToLine(pt, r.geometry) < 12).length;
+      const hits = pts.filter((pt) => distanceToLine(pt, r.geometry) < 7).length; // tight: paths beside a road are common
       if (hits >= Math.ceil(pts.length * .8)) used.add(p.id);
     }
     r.communityPathIds = [...used];
@@ -616,12 +632,17 @@ function renderRouteSheet() {
   const safetyRow = el('div', { class: 'row', style: 'gap:6px;margin:6px 0' },
     el('button', { class: 'btn sm', onclick: () => (state.user ? openArrivalTimer(ctx, { etaS: r.durationS, destName: dest.name }) : openSafety(ctx)) }, '⏱️ Arrival timer'),
     el('button', { class: 'btn sm', onclick: () => openSafety(ctx, { etaS: r.durationS, destName: dest.name }) }, '🛡️ Safety'));
-  renderSheet([head, cards, routePrefsRow(), litToggle, r.source === 'estimate' ? null : shareBlock(), safetyRow,
+  const approx = state.origin?.source === 'gps' && state.position?.accuracy > LOCATION.approximateM;
+  const approxBlock = approx ? el('div', { class: 'notice warn', style: 'margin:6px 0' },
+    el('div', {}, el('strong', {}, `📍 Your location is approximate (±${Math.round(state.position.accuracy)} m).`),
+      ' This device is guessing where you are (usually from Wi-Fi), so the route may not start where you really are.'),
+    el('button', { class: 'btn sm', style: 'margin-top:8px', onclick: chooseStartOnMap }, '🗺️ Choose start on map')) : null;
+  renderSheet([head, approxBlock, cards, routePrefsRow(), litToggle, r.source === 'estimate' ? null : shareBlock(), safetyRow,
     el('div', { class: `notice ${r.source === 'estimate' ? 'warn' : 'info'}` }, r.basis),
     ctx.streetlights ? lightingBlock(r.lighting, { night: !!ctx.lights?.isNight }) : null,
     el('div', { class: 'row', style: 'margin:10px 0' },
       el('button', { class: 'btn primary block', onclick: startNavigation }, r.source === 'estimate' ? 'Start (estimate only)' : 'Start navigation'),
-      el('button', { class: 'btn', onclick: () => { ctx.pickingOrigin = true; toast('Tap the map to choose a new start point'); } }, 'Start point')),
+      el('button', { class: 'btn', onclick: chooseStartOnMap }, 'Start point')),
     alertsBlock,
     trafficBlock,
     el('h3', { style: 'font-size:14px;margin:12px 0 4px' }, 'Directions'), steps,
@@ -637,6 +658,10 @@ function shareBlock() {
   return el('div', { class: 'notice info row between', style: 'margin:6px 0;gap:8px' }, el('span', { class: 'small' }, '👥 ', txt),
     el('button', { class: 'btn sm danger', onclick: async () => { try { await ctx.backend.stopShare(sh.id); toast('Route sharing stopped'); refreshShares(); } catch (e) { toast(e.message, 'error'); } } }, sh.status === 'invited' ? 'Cancel' : 'Stop'));
 }
+function timeDiffS(rt) {
+  const best = state.routes.filter((r) => r.source !== 'estimate' && !r.roadClosed).reduce((m, r) => Math.min(m, r.durationS), Infinity);
+  return Number.isFinite(best) ? rt.durationS - best : 0;
+}
 /** "+X min" against the quickest option (shown on the slower route cards). */
 function timeDiff(rt) {
   const best = state.routes.filter((r) => r.source !== 'estimate' && !r.roadClosed).reduce((m, r) => Math.min(m, r.durationS), Infinity);
@@ -648,7 +673,7 @@ function timeDiff(rt) {
 function labelBasis(rt) {
   if (rt.label === 'Quickest') return rt.trafficChecked ? 'Quickest in current traffic (live TomTom delays included).' : 'Shortest estimated time for this mode.';
   if (rt.label === 'Community shortcut') return 'Quickest option, thanks to a moderator-approved community path the map engine doesn’t know about yet.';
-  if (rt.label === 'More verified paths') return 'Uses more moderator-approved community paths. Approval means the path is on the map — not a safety rating.';
+  if (rt.label === 'More verified paths') return `Uses ${rt.communityPathIds.length > 1 ? 'community paths' : 'a community path'} approved by moderators${timeDiffS(rt) >= 10 ? `, about ${Math.round(timeDiffS(rt))} s slower than the quickest` : ''}. Approval means the path is on the map — not a safety rating.`;
   if (rt.label === 'Most confirmed lighting') return 'Highest share of lamps recently confirmed working by the community. Not a safety guarantee.';
   if (rt.label === 'Fewest hazards') return 'Passes the fewest community-reported hazards (verified reports count most). Reports can be out of date.';
   if (rt.label === 'Flattest') return 'Least climbing of the options, from elevation data. Gradients on short stretches may still be steep.';
@@ -832,7 +857,11 @@ function onNavTick(pos) {
     return;
   }
   sendTripCheckpoint(pos);
-  if (bestD > 80) toast('You look off-route — directions may not match where you are', 'error');
+  const rough = pos.accuracy > LOCATION.approximateM;
+  $('#navAccuracy').hidden = !rough;
+  if (rough) $('#navAccuracy').textContent = `📍 Location approximate (±${Math.round(pos.accuracy)} m) — progress may jump around`;
+  // with a rough position "off-route" is mostly noise; only warn when the fix is good enough to tell
+  else if (bestD > 80 && Date.now() - (ctx.offRouteAt || 0) > 30000) { ctx.offRouteAt = Date.now(); toast('You look off-route — directions may not match where you are', 'error'); }
   showStep(stepI, r, remaining);
   ctx.map.map.panTo(me, { animate: true });
 }

@@ -113,4 +113,14 @@ export const COMMUNITY_ROUTING = {
   skipLegUnderM: 15,    // if you're already this close to the path entrance/exit, no engine leg is needed
   maxSlowdown: 1.25,    // offer a community route if it's at most 25% slower than the quickest
   maxExtraRoutes: 1,
+  // Prefer a route that uses community paths when it is nearly as quick as the fastest one:
+  // it goes first and is selected by default if it is no more than this much slower.
+  preferWithinPct: 0.15,
+  preferWithinS: 90,
+};
+
+// Location accuracy: above this (metres) the position is a rough estimate — usually a laptop or a phone
+// without a GPS fix, placed from nearby Wi-Fi. Routes from it get a warning and an easy "choose start" option.
+export const LOCATION = {
+  approximateM: 100,
 };
