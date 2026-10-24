@@ -394,7 +394,9 @@ export function renderShareBanner(ctx, shares) {
       : pill(s.live && freshness(s) === 'live' ? 'active' : 'paused', `Following ${esc(s.from.alias)}’s trip`,
           !s.live ? 'Live progress is off · route only' : s.lastPos ? (freshness(s) === 'live' ? 'Live' : `Last update ${fmtAgo(s.lastPos.at)}`) : 'Waiting for their first update',
           el('button', { class: 'btn sm', onclick: () => ctx.focusShare(s.id) }, 'View'))),
-    ...recentlyEnded.map((s) => pill('ended', s.direction === 'outgoing' ? `Sharing with ${esc(s.to.alias)} ended` : `${esc(s.from.alias)}’s trip sharing ended`, endedLabel(s.endedReason, s.direction),
+    ...recentlyEnded.map((s) => pill('ended', s.direction === 'outgoing' ? `Sharing with ${esc(s.to.alias)} ended`
+      : s.endedReason === 'safe' ? `✅ ${esc(s.from.alias)} checked in safe` : `${esc(s.from.alias)}’s ${s.type === 'trip' ? 'trip' : 'location'} sharing ended`,
+      s.endedReason === 'safe' && s.direction === 'incoming' ? `at ${clock(s.endedAt)}` : endedLabel(s.endedReason, s.direction),
       el('button', { class: 'btn sm ghost', onclick: () => { (ctx.dismissed ||= new Set()).add(s.id); renderShareBanner(ctx, shares); } }, 'OK'))));
   // let the controls below the banner move down by its real height (it wraps on small screens)
   document.documentElement.style.setProperty('--share-h', `${host.hidden ? 0 : host.offsetHeight}px`);
@@ -446,7 +448,16 @@ export function openShareViewer(ctx, share) {
   const chipCls = share.type === 'trip' && !share.live ? '' : { live: 'live', stale: 'pending', lost: 'danger', none: '' }[f];
   body.push(el('div', { class: 'row wrap', style: 'margin-bottom:8px' }, el('span', { class: `chip ${chipCls}` }, liveTxt), share.sample ? el('span', { class: 'chip sample' }, 'Sample · scripted') : null));
   body.push(el('p', { class: 'muted small' }, `Started ${clock(share.startedAt)} · ends ${clock(share.endsAt)} (${minsLeft(share.endsAt)} min left). Only you can see this.`));
-  if (share.trip) {
+  // location shares can carry safety tags (quick share / arrival timer) — not a trip
+  if (share.type !== 'trip' && share.trip?.sos) body.push(el('div', { class: 'notice danger', style: 'margin-bottom:8px' }, `🚨 ${esc(share.from.alias)} sent this as an SOS. Try calling them. If you think they are in danger, call ${EMERGENCY_NUMBER}.`));
+  if (share.type !== 'trip' && share.trip?.safety) {
+    const late = Date.now() > new Date(share.trip.safety.dueAt);
+    body.push(el('div', { class: `notice ${late ? 'danger' : 'info'}`, style: 'margin-bottom:8px' }, late
+      ? `⚠️ They expected to arrive${share.trip.safety.destName ? ` at ${esc(share.trip.safety.destName)}` : ''} by ${clock(share.trip.safety.dueAt)} and haven't checked in.`
+      : `⏱️ Arrival timer: they expect to arrive${share.trip.safety.destName ? ` at ${esc(share.trip.safety.destName)}` : ''} by ${clock(share.trip.safety.dueAt)}. You'll be told if they don't check in.`));
+  }
+  if (share.type !== 'trip' && (share.trip?.sos || share.trip?.safety)) body.push(el('a', { class: 'btn danger block', href: `tel:${EMERGENCY_NUMBER}`, style: 'margin-bottom:8px' }, `📞 Call ${EMERGENCY_NUMBER}`));
+  if (share.type === 'trip' && share.trip) {
     const t = share.trip;
     const card = el('div', { class: 'card' }, el('div', { class: 'row between' }, el('strong', {}, `→ ${esc(t.destName)}`), el('span', { class: 'muted small' }, modeLabel(t.mode))));
     if (share.live && share.lastPos) {
