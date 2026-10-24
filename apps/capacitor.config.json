@@ -1,0 +1,16 @@
+{
+  "appId": "com.lewisdigital.ghettowayz",
+  "appName": "GettoWayz",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": false
+  },
+  "ios": {
+    "contentInset": "never",
+    "backgroundColor": "#16181f"
+  },
+  "server": {
+    "androidScheme": "https",
+    "iosScheme": "capacitor"
+  }
+}

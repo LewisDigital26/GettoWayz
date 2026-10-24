@@ -1,0 +1,20 @@
+# Rebuilt from the repo root by scripts/sync-web.mjs every time — never edit by hand
+www/
+node_modules/
+
+# Android build output
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.apk
+*.aab
+
+# iOS build output
+ios/App/Pods/
+ios/App/build/
+ios/DerivedData/
+ios/App/App.xcworkspace/xcuserdata/
+ios/App/App.xcodeproj/xcuserdata/

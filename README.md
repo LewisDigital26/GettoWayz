@@ -257,6 +257,20 @@ manifest.webmanifest    PWA manifest + icons/
 config.example.js       copy to config.local.js
 ```
 
+## Three builds: web, Android, iOS
+
+There is **one copy of the app code** — the files above, in the repo root. The website is served straight from it, and the Android APK and iOS app are both built from it via `apps/` (Capacitor). Change the code once and all three get it.
+
+```
+apps/capacitor.config.json   app id + name for both phone apps
+apps/scripts/sync-web.mjs    copies the web code into apps/www before each phone build
+apps/scripts/patch-native.mjs adds location permissions (Android manifest, iOS Info.plist)
+apps/android/                Android Studio project (APK)
+apps/ios/                    Xcode project (needs a Mac or cloud Mac)
+```
+
+Step-by-step commands are in [`apps/README.md`](apps/README.md).
+
 ## Attribution
 
 Map data and streetlight positions © [OpenStreetMap](https://www.openstreetmap.org/copyright) contributors, via the [Overpass API](https://overpass-api.de). Default tiles © [CARTO](https://carto.com/attributions). Search by [Nominatim](https://nominatim.org). Routing (when configured) by [OpenRouteService](https://openrouteservice.org). Leaflet is BSD-2-Clause.

@@ -1,0 +1,24 @@
+{
+  "name": "gettowayz-apps",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GettoWayz phone apps (Android APK + iOS). Both are built from the same web code as the website in the repo root.",
+  "type": "module",
+  "scripts": {
+    "sync-web": "node scripts/sync-web.mjs",
+    "patch": "node scripts/patch-native.mjs",
+    "android": "node scripts/sync-web.mjs && npx cap sync android && node scripts/patch-native.mjs android",
+    "ios": "node scripts/sync-web.mjs && npx cap sync ios && node scripts/patch-native.mjs ios",
+    "all": "node scripts/sync-web.mjs && npx cap sync && node scripts/patch-native.mjs",
+    "open:android": "npx cap open android",
+    "open:ios": "npx cap open ios"
+  },
+  "dependencies": {
+    "@capacitor/android": "^7.0.0",
+    "@capacitor/core": "^7.0.0",
+    "@capacitor/ios": "^7.0.0"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^7.0.0"
+  }
+}
