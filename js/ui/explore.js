@@ -2,7 +2,7 @@
 // directions, OSM facts and community reviews. Reviews never earn points (see backend / migration-008).
 import { el, esc, fmtDistance, fmtAgo } from '../util.js';
 import { state } from '../state.js';
-import { CATEGORIES, CATEGORY_MAP, GROUPS, QUICK, searchPlaces, fetchPlace, placeFacts } from '../providers/places.js';
+import { CATEGORIES, CATEGORY_MAP, GROUPS, QUICK, searchPlaces, fetchPlace, enrichPlace, placeFacts } from '../providers/places.js';
 import { renderSheet, collapse, hideSheet, toast } from './sheet.js';
 import { openModal, closeModal } from './modal.js';
 import { requireSignIn } from './account.js';
@@ -92,6 +92,11 @@ export async function openPlace(ctx, place) {
   const back = el('button', { class: 'btn sm ghost', onclick: () => (ex.cat ? openCategory(ctx, ex.cat) : openExplore(ctx)) }, 'Back');
   const head = () => el('div', { class: 'sheet-title' }, el('h2', {}, `${cat?.emoji || '📍'} ${place.name}`), back);
   const reviewsBox = el('div', {}, el('div', { class: 'loading-row' }, el('span', { class: 'spinner' }), 'Loading reviews…'));
+  if (!place.enriched) {
+    renderSheet([head(), el('div', { class: 'loading-row' }, el('span', { class: 'spinner' }), 'Loading details…')]);
+    await enrichPlace(place);
+    if (state.destination) return; // user moved on
+  }
   const facts = placeFacts(place.tags);
   renderSheet([
     head(),

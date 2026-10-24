@@ -2,12 +2,13 @@
 // Fast mirrors first, a short per-mirror timeout, and a 10-minute cache keyed by the caller.
 // Two kinds of request: a user tap (cancels the previous tap) and a background prefetch (never cancels anything).
 
+// Oct 2026: kumi.systems and private.coffee were hanging and overpass-api.de refusing, so place search no
+// longer depends on Overpass (see places.js). Kept as a last resort with tight timeouts.
 const ENDPOINTS = [
-  'https://overpass.kumi.systems/api/interpreter',
-  'https://overpass.private.coffee/api/interpreter',
   'https://overpass-api.de/api/interpreter',
+  'https://overpass.private.coffee/api/interpreter',
+  'https://overpass.kumi.systems/api/interpreter',
 ];
-const PER_REQUEST_MS = 8000;
 const CACHE_TTL_MS = 10 * 60 * 1000;
 const cache = new Map();          // key -> { at, value }
 let userController = null;        // the in-flight user-initiated request
@@ -22,14 +23,15 @@ export function cached(key) {
  * @param {string} ql              query without the [out:json] header
  * @param {object} o               { key, background, timeoutS }
  */
-export async function overpass(ql, { key = null, background = false, timeoutS = 8 } = {}) {
+export async function overpass(ql, { key = null, background = false, timeoutS = 8, maxTries = 2 } = {}) {
+  const PER_REQUEST_MS = timeoutS * 1000 + 1000;
   if (key != null) { const v = cached(key); if (v !== undefined) return v; }
   let outer;
   if (background) outer = new AbortController().signal;
   else { userController?.abort(); userController = new AbortController(); outer = userController.signal; }
   const q = `[out:json][timeout:${timeoutS}];${ql}`;
   let lastErr;
-  for (const url of ENDPOINTS) {
+  for (const url of ENDPOINTS.slice(0, maxTries)) {
     if (outer.aborted) throw new DOMException('aborted', 'AbortError');
     const ctl = new AbortController();
     const timer = setTimeout(() => ctl.abort(), PER_REQUEST_MS);

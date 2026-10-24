@@ -1,8 +1,8 @@
-// Places provider — "Explore nearby". Categories are OpenStreetMap tag sets, searched via Overpass.
+// Places provider — "Explore nearby". Categories are OpenStreetMap tag sets, searched via Photon → Nominatim → Overpass.
 // Place = { id, key, name, sub, lat, lng, kind, cat, source:'osm', dist, tags }
 //   key  = "node/123" | "way/456" | "relation/789" — stable OSM ref used for community reviews
 import { haversine } from '../util.js';
-import { overpass, cached } from './overpass.js';
+import { overpass } from './overpass.js';
 
 export const DEFAULT_RADIUS_M = 1000;
 export const MAX_RESULTS = 30;
@@ -74,25 +74,146 @@ export function toPlace(e, near, cat = null) {
 
 const selector = (match, around) => Object.entries(match).map(([k, vals]) => `nwr["${k}"~"^(${vals.join('|')})$"]${around};`).join('');
 
+// ---------- search backends ----------
+// 1. Photon (komoot) reverse search filtered by OSM tag: ~50 ms, named places only.
+// 2. Nominatim bounded search per tag ("[fuel]"): ~0.5 s, picks up some unnamed places Photon skips.
+// 3. Overpass: one short attempt as a last resort (the public Overpass servers are often down or overloaded).
+const OSM_TYPE = { N: 'node', W: 'way', R: 'relation', node: 'node', way: 'way', relation: 'relation' };
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const placeCache = new Map();   // key -> { at, value }
+
+function withTimeout(ms, outer) {
+  const ctl = new AbortController();
+  const timer = setTimeout(() => ctl.abort(), ms);
+  outer?.addEventListener('abort', () => ctl.abort(), { once: true });
+  return { signal: ctl.signal, done: () => clearTimeout(timer) };
+}
+async function getJSON(url, ms, outer) {
+  const t = withTimeout(ms, outer);
+  try {
+    const res = await fetch(url, { signal: t.signal, headers: { Accept: 'application/json' } });
+    if (!res.ok) throw new Error(`${new URL(url).host} ${res.status}`);
+    return await res.json();
+  } finally { t.done(); }
+}
+const tagPairs = (match) => Object.entries(match).flatMap(([k, vals]) => vals.map((v) => [k, v]));
+
+async function viaPhoton(cat, [lat, lng], radius, outer) {
+  const p = new URLSearchParams({ lat, lon: lng, limit: '50', radius: String(Math.max(0.2, radius / 1000)), lang: 'en' });
+  for (const [k, v] of tagPairs(cat.match)) p.append('osm_tag', `${k}:${v}`);
+  const j = await getJSON(`https://photon.komoot.io/reverse?${p}`, 5000, outer);
+  return (j.features || []).map((f) => {
+    const pr = f.properties || {};
+    const type = OSM_TYPE[pr.osm_type];
+    if (!type || !f.geometry?.coordinates) return null;
+    const tags = { [pr.osm_key]: pr.osm_value };
+    if (pr.name) tags.name = pr.name;
+    if (pr.housenumber) tags['addr:housenumber'] = pr.housenumber;
+    if (pr.street) tags['addr:street'] = pr.street;
+    if (pr.city) tags['addr:city'] = pr.city;
+    if (pr.postcode) tags['addr:postcode'] = pr.postcode;
+    return { type, id: pr.osm_id, lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0], tags };
+  }).filter(Boolean);
+}
+
+function fromNominatim(r) {
+  const type = OSM_TYPE[r.osm_type];
+  if (!type) return null;
+  const a = r.address || {};
+  const tags = { ...(r.extratags || {}), [r.category]: r.type };
+  if (r.name) tags.name = r.name;
+  if (a.house_number) tags['addr:housenumber'] = a.house_number;
+  if (a.road) tags['addr:street'] = a.road;
+  if (a.city || a.town || a.village) tags['addr:city'] = a.city || a.town || a.village;
+  if (a.postcode) tags['addr:postcode'] = a.postcode;
+  return { type, id: r.osm_id, lat: +r.lat, lon: +r.lon, tags };
+}
+
+async function viaNominatim(cat, [lat, lng], radius, outer) {
+  const dLat = radius / 111000, dLng = radius / (111000 * Math.cos(lat * Math.PI / 180));
+  const viewbox = `${lng - dLng},${lat + dLat},${lng + dLng},${lat - dLat}`;
+  const pairs = tagPairs(cat.match).slice(0, 4);   // keep it polite: at most 4 requests
+  const lists = await Promise.all(pairs.map(([, v]) => {
+    const p = new URLSearchParams({ q: `[${v}]`, format: 'jsonv2', limit: '40', bounded: '1', viewbox, addressdetails: '1' });
+    return getJSON(`https://nominatim.openstreetmap.org/search?${p}`, 6000, outer).catch(() => []);
+  }));
+  const allowed = new Set(pairs.map(([k, v]) => `${k}=${v}`));
+  return lists.flat().filter((r) => allowed.has(`${r.category}=${r.type}`)).map(fromNominatim).filter(Boolean);
+}
+
+async function viaOverpass(cat, [lat, lng], radius, background) {
+  return overpass(`(${selector(cat.match, `(around:${radius},${lat},${lng})`)});out center ${MAX_RESULTS} tags;`, { background, timeoutS: 5, maxTries: 1 });
+}
+
+let userCtl = null;   // a new tap cancels the previous tap's search
+
 /** Places of one category around [lat,lng]. Sorted by distance. */
 export async function searchPlaces(cat, near, { radius = DEFAULT_RADIUS_M, background = false } = {}) {
   const [lat, lng] = near;
   const key = `places:${cat.key}:${lat.toFixed(3)}:${lng.toFixed(3)}:${radius}`;
-  const hit = cached(key);
-  const elements = hit !== undefined ? hit : await overpass(`(${selector(cat.match, `(around:${radius},${lat},${lng})`)});out center ${MAX_RESULTS} tags;`, { key, background });
-  return elements.map((e) => toPlace(e, near, cat)).filter(Boolean).sort((a, b) => a.dist - b.dist);
+  const hit = placeCache.get(key);
+  if (hit && Date.now() - hit.at < CACHE_TTL_MS) return hit.value;
+  let outer = null;
+  if (!background) { userCtl?.abort(); userCtl = new AbortController(); outer = userCtl.signal; }
+  const aborted = () => { if (outer?.aborted) throw new DOMException('aborted', 'AbortError'); };
+
+  let elements = [];
+  try { elements = await viaPhoton(cat, near, radius, outer); } catch (e) { aborted(); }
+  aborted();
+  if (elements.length < 3) {
+    try {
+      const more = await viaNominatim(cat, near, radius, outer);
+      const seen = new Set(elements.map((e) => `${e.type}/${e.id}`));
+      elements = elements.concat(more.filter((e) => !seen.has(`${e.type}/${e.id}`)));
+    } catch (e) { aborted(); }
+  }
+  aborted();
+  if (!elements.length) {
+    try { elements = await viaOverpass(cat, near, radius, background); } catch (e) { aborted(); }
+  }
+  const places = elements.map((e) => toPlace(e, near, cat)).filter((p) => p && p.dist <= radius * 1.25)
+    .sort((a, b) => a.dist - b.dist).slice(0, MAX_RESULTS);
+  placeCache.set(key, { at: Date.now(), value: places });
+  return places;
 }
 
-/** Warm the cache for the quick-pick categories so the first tap is instant. */
+/** Warm the cache for the quick-pick categories so the first tap is instant (Photon is cheap). */
 export function prefetchPlaces(near) {
   for (const cat of QUICK.slice(0, 3)) searchPlaces(cat, near, { background: true }).catch(() => {});
+}
+
+/** Full OSM tags (hours, phone, website…) for one place via Nominatim lookup. */
+const detailCache = new Map();
+async function lookupTags(key) {
+  if (detailCache.has(key)) return detailCache.get(key);
+  const [type, id] = key.split('/');
+  const p = new URLSearchParams({ osm_ids: `${type[0].toUpperCase()}${id}`, format: 'jsonv2', extratags: '1', addressdetails: '1' });
+  const j = await getJSON(`https://nominatim.openstreetmap.org/lookup?${p}`, 5000);
+  const el = j[0] ? fromNominatim(j[0]) : null;
+  detailCache.set(key, el);
+  return el;
+}
+
+/** Add the extra tags to a place found by Photon. Never throws; returns the same place if lookup fails. */
+export async function enrichPlace(place) {
+  if (!place?.key || place.enriched) return place;
+  try {
+    const el = await lookupTags(place.key);
+    if (el) place.tags = { ...place.tags, ...el.tags };
+  } catch { /* keep what we have */ }
+  place.enriched = true;
+  return place;
 }
 
 /** Fetch one place by its OSM key ("node/123") — used to re-open a reviewed place from a review list. */
 export async function fetchPlace(key, near = null) {
   const [type, id] = key.split('/');
   if (!['node', 'way', 'relation'].includes(type) || !/^\d+$/.test(id)) return null;
-  const elements = await overpass(`${type}(${id});out center tags;`, { key: `place:${key}`, background: true });
+  try {
+    const el = await lookupTags(key);
+    if (el) { const p = toPlace(el, near); p.enriched = true; return p; }
+  } catch { /* fall through to Overpass */ }
+  const elements = await overpass(`${type}(${id});out center tags;`, { key: `place:${key}`, background: true, timeoutS: 5 });
   return elements[0] ? toPlace(elements[0], near) : null;
 }
 
